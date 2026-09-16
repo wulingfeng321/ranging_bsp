@@ -354,6 +354,10 @@
                     <state>$PROJ_DIR$/../Middlewares/Third_Party/FatFs/src</state>
                     <state>$PROJ_DIR$/../Drivers/CMSIS/Device/ST/STM32F7xx/Include</state>
                     <state>$PROJ_DIR$/../Drivers/CMSIS/Include</state>
+                    <state>E:\IARprojects\STM32CubeF7_cut\Drivers\BSP\STM32746G-Discovery</state>
+                    <state>E:\IARprojects\STM32CubeF7_cut\Drivers\BSP\Components\rk043fn48h</state>
+                    <state>E:\IARprojects\STM32CubeF7_cut\Drivers\BSP\Components</state>
+                    <state>E:\IARprojects\STM32CubeF7_cut\Utilities\Fonts</state>
                 </option>
                 <option>
                     <name>CCStdIncCheck</name>
