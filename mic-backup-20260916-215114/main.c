@@ -24,7 +24,6 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "stm32746g_discovery_lcd.h"
-#include "app_mic_scope.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -280,7 +279,6 @@ int main(void)
   MX_GPIO_Init();
 #endif
   LCD_Grid_Init();
-  MicScope_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -290,7 +288,6 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    MicScope_Process();
   }
   /* USER CODE END 3 */
 }

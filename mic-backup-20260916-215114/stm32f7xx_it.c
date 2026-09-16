@@ -259,11 +259,5 @@ void DMA2D_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-/* BSP audio owns this DMA handle (not CubeMX's hsai_BlockB2). */
-extern SAI_HandleTypeDef haudio_in_sai;
-void DMA2_Stream7_IRQHandler(void)
-{
-  HAL_DMA_IRQHandler(haudio_in_sai.hdmarx);
-}
 
 /* USER CODE END 1 */
