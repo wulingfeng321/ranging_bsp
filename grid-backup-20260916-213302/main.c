@@ -23,7 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "stm32746g_discovery_lcd.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -33,10 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* Set to 0 only after configuring the other board peripherals for use. */
-#define LCD_GRID_DEMO_ONLY  1
-#define LCD_GRID_STEP       20U
-#define LCD_GRID_LAYER      0U
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -139,80 +136,12 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART6_UART_Init(void);
 static void MX_USB_OTG_FS_HCD_Init(void);
 /* USER CODE BEGIN PFP */
-static void LCD_FramebufferMPU_Config(void);
-static void LCD_Grid_Init(void);
-static void LCD_DrawLowerHalfGrid(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/* PeriphCommonClock_Config already supplies 384 / 5 / 8 = 9.6 MHz.
- * Keep that PLLSAI configuration, including its separate 48 MHz output. */
-void BSP_LCD_ClockConfig(LTDC_HandleTypeDef *handle, void *params)
-{
-  (void)handle;
-  (void)params;
-}
 
-static void LCD_FramebufferMPU_Config(void)
-{
-  MPU_Region_InitTypeDef region = {0};
-
-  /* Normal, non-cacheable SDRAM: CPU, DMA2D and LTDC see the same pixels. */
-  HAL_MPU_Disable();
-  region.Enable = MPU_REGION_ENABLE;
-  region.Number = MPU_REGION_NUMBER0;
-  region.BaseAddress = LCD_FB_START_ADDRESS;
-  region.Size = MPU_REGION_SIZE_8MB;
-  region.SubRegionDisable = 0;
-  region.TypeExtField = MPU_TEX_LEVEL1;
-  region.AccessPermission = MPU_REGION_FULL_ACCESS;
-  region.DisableExec = MPU_INSTRUCTION_ACCESS_DISABLE;
-  region.IsShareable = MPU_ACCESS_SHAREABLE;
-  region.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-  region.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
-  HAL_MPU_ConfigRegion(&region);
-  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
-}
-
-static void LCD_DrawLowerHalfGrid(void)
-{
-  uint32_t x;
-  uint32_t y;
-  const uint32_t width = BSP_LCD_GetXSize();
-  const uint32_t height = BSP_LCD_GetYSize();
-  const uint32_t top = height / 2U;
-
-  BSP_LCD_SetTextColor(LCD_COLOR_WHITE);
-  for (x = 0; x < width; x += LCD_GRID_STEP)
-  {
-    BSP_LCD_DrawVLine((uint16_t)x, (uint16_t)top,
-                     (uint16_t)(height - top));
-  }
-  for (y = top; y < height; y += LCD_GRID_STEP)
-  {
-    BSP_LCD_DrawHLine(0, (uint16_t)y, (uint16_t)width);
-  }
-  /* Close the right/bottom edges without writing outside the framebuffer. */
-  BSP_LCD_DrawVLine((uint16_t)(width - 1U), (uint16_t)top,
-                   (uint16_t)(height - top));
-  BSP_LCD_DrawHLine(0, (uint16_t)(height - 1U), (uint16_t)width);
-}
-
-static void LCD_Grid_Init(void)
-{
-  if (BSP_LCD_Init() != LCD_OK)
-  {
-    Error_Handler();
-  }
-  BSP_LCD_DisplayOff();
-  BSP_LCD_LayerDefaultInit(LCD_GRID_LAYER, LCD_FB_START_ADDRESS);
-  BSP_LCD_SelectLayer(LCD_GRID_LAYER);
-  BSP_LCD_Clear(LCD_COLOR_BLACK);
-  LCD_DrawLowerHalfGrid();
-  __DSB();
-  BSP_LCD_DisplayOn();
-}
 /* USER CODE END 0 */
 
 /**
@@ -223,7 +152,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  LCD_FramebufferMPU_Config();
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -242,9 +171,7 @@ int main(void)
   PeriphCommonClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  /* Keep this display test independent of an SD card or Ethernet link.
-   * The conditional spans CubeMX's generated peripheral startup calls. */
-#if !LCD_GRID_DEMO_ONLY
+
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -254,10 +181,10 @@ int main(void)
   MX_DCMI_Init();
   MX_DMA2D_Init();
   MX_ETH_Init();
-  /* SDRAM is initialized by BSP_LCD_Init(). */
+  MX_FMC_Init();
   MX_I2C1_Init();
   MX_I2C3_Init();
-  /* LTDC is initialized by BSP_LCD_Init(). */
+  MX_LTDC_Init();
   MX_QUADSPI_Init();
   MX_RTC_Init();
   MX_SAI2_Init();
@@ -275,10 +202,7 @@ int main(void)
   MX_FATFS_Init();
   MX_USB_OTG_FS_HCD_Init();
   /* USER CODE BEGIN 2 */
-#else
-  MX_GPIO_Init();
-#endif
-  LCD_Grid_Init();
+
   /* USER CODE END 2 */
 
   /* Infinite loop */

@@ -21,7 +21,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 /* USER CODE BEGIN Includes */
-#include "stm32746g_discovery_lcd.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -625,9 +625,7 @@ void HAL_LTDC_MspInit(LTDC_HandleTypeDef* hltdc)
   if(hltdc->Instance==LTDC)
   {
     /* USER CODE BEGIN LTDC_MspInit 0 */
-    /* BSP owns the LCD pins and sets their speed for the pixel clock. */
-    BSP_LCD_MspInit(hltdc, NULL);
-#if 0
+
     /* USER CODE END LTDC_MspInit 0 */
     /* Peripheral clock enable */
     __HAL_RCC_LTDC_CLK_ENABLE();
@@ -710,7 +708,7 @@ void HAL_LTDC_MspInit(LTDC_HandleTypeDef* hltdc)
     HAL_NVIC_SetPriority(LTDC_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(LTDC_IRQn);
     /* USER CODE BEGIN LTDC_MspInit 1 */
-#endif
+
     /* USER CODE END LTDC_MspInit 1 */
 
   }
