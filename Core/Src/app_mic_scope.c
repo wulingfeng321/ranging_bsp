@@ -3,11 +3,12 @@
 #include "stm32746g_discovery_lcd.h"
 #include <stdint.h>
 #include <stdio.h>
+#include "mic_scope_trigger.h"
 
 /* Nominal 16 kHz stereo PCM, 160 ms visible, 16 ms per DMA half. */
 #define SAMPLE_RATE       16000U
 #define WINDOW_FRAMES    2560U
-#define RING_FRAMES      4096U
+#define RING_FRAMES      WINDOW_FRAMES
 #define HALF_FRAMES      256U
 #define DMA_WORDS        (HALF_FRAMES * 2U * 2U)
 #define PLOT_WIDTH       480U
@@ -24,6 +25,15 @@ extern SAI_HandleTypeDef haudio_in_sai;
 extern LTDC_HandleTypeDef hLtdcHandler;
 static volatile int16_t history[RING_FRAMES][2];
 static int16_t snapshot[WINDOW_FRAMES][2];
+static int16_t heldWave[WINDOW_FRAMES][2];
+static volatile uint32_t sweepNumber;
+static uint32_t triggerSweep;
+static uint32_t holdTick;
+static uint32_t rearmTick;
+/* 0 = live, 1 = finish current sweep, 2 = held event snapshot. */
+static uint8_t holdState;
+static uint8_t rearmWaiting;
+static uint32_t sweepColumn;
 static volatile uint32_t writeFrame;
 static volatile uint32_t validFrames;
 volatile uint32_t micDmaBlocks;
@@ -96,7 +106,9 @@ static void DrawDashboard(uint32_t now)
   BSP_LCD_SetFont(&Font12);
   Text(250, 29, state, color);
   Text(250, 47, audioStatus, started ? LCD_COLOR_CYAN : LCD_COLOR_RED);
-  Text(12, 78, "LOCAL L/R | 16kHz | 160ms | 20ms/div | AUTO", LCD_COLOR_WHITE);
+  Text(250, 63, holdState == 2 ? "WAVE HOLD" :
+       (holdState == 1 ? "TRIGGER: WAIT END" : "WAVE LIVE"), LCD_COLOR_YELLOW);
+  Text(12, 78, "L/R | 160ms | 20ms/div | SWEEP | AUTO", LCD_COLOR_WHITE);
   BSP_LCD_SetTextColor(0xFF404040U);
   BSP_LCD_DrawHLine(0, 95, PLOT_WIDTH);
 }
@@ -111,7 +123,8 @@ static void StoreHalf(uint32_t wordOffset)
   {
     history[pos][0] = src[wordOffset + 2U * i];
     history[pos][1] = src[wordOffset + 2U * i + 1U];
-    pos = (pos + 1U) & (RING_FRAMES - 1U);
+    /* Fixed horizontal slots: wrap at one screen, never shift old samples. */
+    if (++pos == RING_FRAMES) { pos = 0; ++sweepNumber; }
   }
   writeFrame = pos;
   if (validFrames < RING_FRAMES)
@@ -179,6 +192,9 @@ static void DrawChannel(uint32_t channel, int32_t mean, int32_t scale)
   BSP_LCD_SetTextColor(channel == 0 ? LCD_COLOR_GREEN : LCD_COLOR_CYAN);
   for (x = 0; x < PLOT_WIDTH; ++x)
   {
+    BSP_LCD_SetTextColor(channel == 0 ?
+        (holdState == 2 || x < sweepColumn ? LCD_COLOR_GREEN : 0xFF008000U) :
+        (holdState == 2 || x < sweepColumn ? LCD_COLOR_CYAN : 0xFF008080U));
     begin = x * WINDOW_FRAMES / PLOT_WIDTH;
     end = (x + 1U) * WINDOW_FRAMES / PLOT_WIDTH;
     low = high = snapshot[begin][channel];
@@ -195,7 +211,7 @@ static void DrawChannel(uint32_t channel, int32_t mean, int32_t scale)
 
 void MicScope_Process(void)
 {
-  uint32_t now, i, c, pos, irqMask;
+  uint32_t now, i, c, irqMask, capturedWrite, capturedSweep;
   int32_t mean[2] = {0, 0};
   int32_t scale = 512; /* Limit amplification of the silence noise floor. */
   int32_t magnitude;
@@ -209,6 +225,7 @@ void MicScope_Process(void)
   {
     audioStatus = "MIC DATA ERROR";
     started = 0;
+    holdState = 0;
   }
   if (now - lastDraw < REFRESH_MS ||
       (LTDC->SRCR & LTDC_SRCR_VBR)) return;
@@ -216,17 +233,47 @@ void MicScope_Process(void)
 
   if (started && validFrames >= WINDOW_FRAMES)
   {
+    if (holdState == 2 && now - holdTick >= MIC_SCOPE_HOLD_MS)
+    {
+      holdState = 0;
+      rearmWaiting = 1;
+      rearmTick = now;
+    }
+    if (rearmWaiting && now - rearmTick >= 160U) rearmWaiting = 0;
     /* Short coherent copy; never keep interrupts masked during LCD drawing. */
     irqMask = __get_PRIMASK();
     __disable_irq();
-    pos = (writeFrame + RING_FRAMES - WINDOW_FRAMES) & (RING_FRAMES - 1U);
+    /* Copy in physical slot order, not oldest-to-newest order. Both channels
+     * and the cursor are captured together so they cannot drift apart. */
+    sweepColumn = writeFrame * PLOT_WIDTH / WINDOW_FRAMES;
+    capturedWrite = writeFrame;
+    capturedSweep = sweepNumber;
     for (i = 0; i < WINDOW_FRAMES; ++i)
     {
-      snapshot[i][0] = history[pos][0];
-      snapshot[i][1] = history[pos][1];
-      pos = (pos + 1U) & (RING_FRAMES - 1U);
+      snapshot[i][0] = history[i][0];
+      snapshot[i][1] = history[i][1];
     }
     __set_PRIMASK(irqMask);
+    if (holdState == 1 && capturedSweep != triggerSweep)
+    {
+      holdState = 2;
+      holdTick = now;
+    }
+    if (holdState == 0 && !rearmWaiting && MIC_SCOPE_HOLD_MS > 0U &&
+        MicScope_IsChirpCandidate(snapshot, WINDOW_FRAMES, capturedWrite,
+                                 MIC_SCOPE_TRIGGER_MIN_LEVEL))
+    {
+      /* Keep a chronological event window, including a boundary-crossing
+       * signature. Display it only once the current live sweep has ended. */
+      for (i = 0; i < WINDOW_FRAMES; ++i)
+        for (c = 0; c < 2; ++c)
+          heldWave[i][c] = snapshot[(capturedWrite + i) % WINDOW_FRAMES][c];
+      triggerSweep = capturedSweep;
+      holdState = 1;
+    }
+    if (holdState == 2)
+      for (i = 0; i < WINDOW_FRAMES; ++i)
+        for (c = 0; c < 2; ++c) snapshot[i][c] = heldWave[i][c];
     for (i = 0; i < WINDOW_FRAMES; ++i)
       for (c = 0; c < 2; ++c) mean[c] += snapshot[i][c];
     mean[0] /= (int32_t)WINDOW_FRAMES;
