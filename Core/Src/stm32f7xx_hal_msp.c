@@ -625,6 +625,7 @@ void HAL_LTDC_MspInit(LTDC_HandleTypeDef* hltdc)
   if(hltdc->Instance==LTDC)
   {
     /* USER CODE BEGIN LTDC_MspInit 0 */
+    (void)GPIO_InitStruct; /* Generated local is unused by the BSP path. */
     /* BSP owns the LCD pins and sets their speed for the pixel clock. */
     BSP_LCD_MspInit(hltdc, NULL);
 #if 0
@@ -1912,7 +1913,7 @@ void HAL_SAI_MspInit(SAI_HandleTypeDef* hsai)
     GPIO_InitStruct.Pin = SAI2_MCLKA_Pin|SAI2_SCKA_Pin|SAI2_FSA_Pin|SAI2_SDA_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF10_SAI2;
     HAL_GPIO_Init(GPIOI, &GPIO_InitStruct);
 
@@ -1932,7 +1933,7 @@ void HAL_SAI_MspInit(SAI_HandleTypeDef* hsai)
     GPIO_InitStruct.Pin = SAI2_SDB_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF10_SAI2;
     HAL_GPIO_Init(SAI2_SDB_GPIO_Port, &GPIO_InitStruct);
 

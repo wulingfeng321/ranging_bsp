@@ -255,10 +255,10 @@ int main(void)
   MX_DCMI_Init();
   MX_DMA2D_Init();
   MX_ETH_Init();
-  /* SDRAM is initialized by BSP_LCD_Init(). */
+  MX_FMC_Init();
   MX_I2C1_Init();
   MX_I2C3_Init();
-  /* LTDC is initialized by BSP_LCD_Init(). */
+  MX_LTDC_Init();
   MX_QUADSPI_Init();
   MX_RTC_Init();
   MX_SAI2_Init();
@@ -277,6 +277,33 @@ int main(void)
   MX_USB_OTG_FS_HCD_Init();
   /* USER CODE BEGIN 2 */
 #else
+  /* Generated init functions remain available for later CubeMX work.
+   * These references make the intentionally unused functions explicit;
+   * no peripheral is started by a function-designator expression. */
+  (void)MX_ADC3_Init;
+  (void)MX_CRC_Init;
+  (void)MX_DCMI_Init;
+  (void)MX_DMA2D_Init;
+  (void)MX_ETH_Init;
+  (void)MX_FMC_Init;
+  (void)MX_I2C1_Init;
+  (void)MX_I2C3_Init;
+  (void)MX_LTDC_Init;
+  (void)MX_QUADSPI_Init;
+  (void)MX_RTC_Init;
+  (void)MX_SAI2_Init;
+  (void)MX_SDMMC1_SD_Init;
+  (void)MX_SPDIFRX_Init;
+  (void)MX_SPI2_Init;
+  (void)MX_TIM1_Init;
+  (void)MX_TIM2_Init;
+  (void)MX_TIM3_Init;
+  (void)MX_TIM5_Init;
+  (void)MX_TIM8_Init;
+  (void)MX_TIM12_Init;
+  (void)MX_USART1_UART_Init;
+  (void)MX_USART6_UART_Init;
+  (void)MX_USB_OTG_FS_HCD_Init;
   MX_GPIO_Init();
 #endif
   LCD_Grid_Init();
@@ -690,6 +717,8 @@ static void MX_LTDC_Init(void)
 {
 
   /* USER CODE BEGIN LTDC_Init 0 */
+  /* BSP_LCD_Init owns this peripheral, including its configuration. */
+#if 0
 
   /* USER CODE END LTDC_Init 0 */
 
@@ -738,6 +767,7 @@ static void MX_LTDC_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN LTDC_Init 2 */
+#endif
 
   /* USER CODE END LTDC_Init 2 */
 
@@ -1505,6 +1535,8 @@ static void MX_FMC_Init(void)
 {
 
   /* USER CODE BEGIN FMC_Init 0 */
+  /* BSP_LCD_Init owns this peripheral, including its configuration. */
+#if 0
 
   /* USER CODE END FMC_Init 0 */
 
@@ -1543,6 +1575,7 @@ static void MX_FMC_Init(void)
   }
 
   /* USER CODE BEGIN FMC_Init 2 */
+#endif
 
   /* USER CODE END FMC_Init 2 */
 }
