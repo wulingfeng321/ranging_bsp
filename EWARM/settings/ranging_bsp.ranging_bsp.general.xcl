@@ -1,20 +1,20 @@
-"E:\12\arm\bin\armproc.dll" 
+"C:\Program Files (x86)\IAR Systems\Embedded Workbench 8.2\arm\bin\armproc.dll" 
 
-"E:\12\arm\bin\armstlink2.dll" 
+"C:\Program Files (x86)\IAR Systems\Embedded Workbench 8.2\arm\bin\armstlink2.dll" 
 
-"C:\Users\10990\Desktop\QRUSGI\STM32CubeF7_cut\STM32CubeF7_cut\Project\ranging_bsp\EWARM\ranging_bsp\Exe\ranging_bsp.out" 
+"E:\IARprojects\STM32CubeF7_cut\Project\ranging_bsp\EWARM\ranging_bsp\Exe\ranging_bsp.out" 
 
---plugin="E:\12\arm\bin\armbat.dll" 
+--plugin="C:\Program Files (x86)\IAR Systems\Embedded Workbench 8.2\arm\bin\armbat.dll" 
 
---device_macro="E:\12\arm\config\debugger\ST\STM32F7xx.dmac" 
+--device_macro="C:\Program Files (x86)\IAR Systems\Embedded Workbench 8.2\arm\config\debugger\ST\STM32F7xx.dmac" 
 
---device_macro="E:\12\arm\config\debugger\ST\STM32F7xx_DBG.dmac" 
+--device_macro="C:\Program Files (x86)\IAR Systems\Embedded Workbench 8.2\arm\config\debugger\ST\STM32F7xx_DBG.dmac" 
 
---device_macro="E:\12\arm\config\debugger\ST\STM32F7xx_OB.dmac" 
+--device_macro="C:\Program Files (x86)\IAR Systems\Embedded Workbench 8.2\arm\config\debugger\ST\STM32F7xx_OB.dmac" 
 
---device_macro="E:\12\arm\config\debugger\ST\STM32F7xx_TRACE.dmac" 
+--device_macro="C:\Program Files (x86)\IAR Systems\Embedded Workbench 8.2\arm\config\debugger\ST\STM32F7xx_TRACE.dmac" 
 
---flash_loader="E:\12\arm\config\flashloader\ST\FlashSTM32F74xxG.board" 
+--flash_loader="C:\Program Files (x86)\IAR Systems\Embedded Workbench 8.2\arm\config\flashloader\ST\FlashSTM32F74xxG.board" 
 
 
 

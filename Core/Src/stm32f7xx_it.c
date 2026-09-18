@@ -236,7 +236,14 @@ void OTG_FS_IRQHandler(void)
 void LTDC_IRQHandler(void)
 {
   /* USER CODE BEGIN LTDC_IRQn 0 */
-
+  /* BSP_LCD_Init owns the active LTDC handle in the display application.
+   * CubeMX's hltdc may never have been initialized in demo mode. */
+  extern LTDC_HandleTypeDef hLtdcHandler;
+  if (hLtdcHandler.Instance == LTDC)
+  {
+    HAL_LTDC_IRQHandler(&hLtdcHandler);
+    return;
+  }
   /* USER CODE END LTDC_IRQn 0 */
   HAL_LTDC_IRQHandler(&hltdc);
   /* USER CODE BEGIN LTDC_IRQn 1 */

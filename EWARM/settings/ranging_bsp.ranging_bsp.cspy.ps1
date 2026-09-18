@@ -23,9 +23,9 @@
 
 if ($debugfile -eq "")
 {
-& "E:\12\common\bin\cspybat" -f "C:\Users\10990\Desktop\QRUSGI\STM32CubeF7_cut\STM32CubeF7_cut\Project\ranging_bsp\EWARM\settings\ranging_bsp.ranging_bsp.general.xcl" --backend -f "C:\Users\10990\Desktop\QRUSGI\STM32CubeF7_cut\STM32CubeF7_cut\Project\ranging_bsp\EWARM\settings\ranging_bsp.ranging_bsp.driver.xcl" 
+& "C:\Program Files (x86)\IAR Systems\Embedded Workbench 8.2\common\bin\cspybat" -f "E:\IARprojects\STM32CubeF7_cut\Project\ranging_bsp\EWARM\settings\ranging_bsp.ranging_bsp.general.xcl" --backend -f "E:\IARprojects\STM32CubeF7_cut\Project\ranging_bsp\EWARM\settings\ranging_bsp.ranging_bsp.driver.xcl" 
 }
 else
 {
-& "E:\12\common\bin\cspybat" -f "C:\Users\10990\Desktop\QRUSGI\STM32CubeF7_cut\STM32CubeF7_cut\Project\ranging_bsp\EWARM\settings\ranging_bsp.ranging_bsp.general.xcl" --debug_file=$debugfile --backend -f "C:\Users\10990\Desktop\QRUSGI\STM32CubeF7_cut\STM32CubeF7_cut\Project\ranging_bsp\EWARM\settings\ranging_bsp.ranging_bsp.driver.xcl" 
+& "C:\Program Files (x86)\IAR Systems\Embedded Workbench 8.2\common\bin\cspybat" -f "E:\IARprojects\STM32CubeF7_cut\Project\ranging_bsp\EWARM\settings\ranging_bsp.ranging_bsp.general.xcl" --debug_file=$debugfile --backend -f "E:\IARprojects\STM32CubeF7_cut\Project\ranging_bsp\EWARM\settings\ranging_bsp.ranging_bsp.driver.xcl" 
 }
