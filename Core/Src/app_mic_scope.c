@@ -1,4 +1,6 @@
 #include "app_mic_scope.h"
+#include "app_net.h"
+#include "app_board_config.h"
 #include "stm32746g_discovery_audio.h"
 #include "stm32746g_discovery_lcd.h"
 #include <stdint.h>
@@ -77,6 +79,7 @@ static void Text(uint16_t x, uint16_t y, const char *text, uint32_t color)
 static void DrawDashboard(uint32_t now)
 {
   char value[20];
+  char netText[32];
   const char *state = "WAITING FOR RESULT";
   uint32_t color = LCD_COLOR_YELLOW;
   uint8_t fresh = rangeState == MIC_SCOPE_RANGE_VALID &&
@@ -85,6 +88,11 @@ static void DrawDashboard(uint32_t now)
   BSP_LCD_SetFont(&Font16);
   Text(12, 4, "ACOUSTIC RANGING", LCD_COLOR_CYAN);
   BSP_LCD_SetFont(&Font12);
+  (void)snprintf(netText, sizeof(netText), "%s NET %s OK:%lu", APP_BOARD_NAME,
+                 appNetStatus.initError ? "ERROR" :
+                 (appNetStatus.online ? "ONLINE" : "WAIT"),
+                 (unsigned long)appNetStatus.testAck);
+  Text(250, 4, netText, appNetStatus.online ? LCD_COLOR_GREEN : LCD_COLOR_YELLOW);
   Text(12, 27, "BOARD DISTANCE", LCD_COLOR_WHITE);
   if (fresh)
   {

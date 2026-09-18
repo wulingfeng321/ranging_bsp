@@ -40,6 +40,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "app_net.h"
 #include "stm32746g_discovery_lcd.h"
 #include "app_mic_scope.h"
 /* USER CODE END Includes */
@@ -51,8 +52,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* Set to 0 only after configuring the other board peripherals for use. */
-#define LCD_GRID_DEMO_ONLY  0
+/* BSP owns LCD/audio startup. Skip unrelated generated peripherals (e.g. SD).
+ * Ethernet is initialized independently below in either mode. */
+#define LCD_GRID_DEMO_ONLY  1
 #define LCD_GRID_STEP       20U
 #define LCD_GRID_LAYER      0U
 /* USER CODE END PD */
@@ -104,6 +106,11 @@ static void LCD_FramebufferMPU_Config(void)
   region.IsShareable = MPU_ACCESS_SHAREABLE;
   region.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
   region.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
+  HAL_MPU_ConfigRegion(&region);
+  /* Reserved by stm32f746xx_ethernet.icf: RX pool, LwIP heap and descriptors. */
+  region.Number = MPU_REGION_NUMBER1;
+  region.BaseAddress = 0x20040000U;
+  region.Size = MPU_REGION_SIZE_64KB;
   HAL_MPU_ConfigRegion(&region);
   HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
 }
@@ -175,8 +182,8 @@ int main(void)
   PeriphCommonClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  /* Keep this display test independent of an SD card or Ethernet link.
-   * The conditional spans CubeMX's generated peripheral startup calls. */
+  /* Keep the BSP display/audio and Ethernet test independent of an SD card.
+   * The conditional spans unrelated CubeMX peripheral startup calls. */
 #if !LCD_GRID_DEMO_ONLY
   /* USER CODE END SysInit */
 
@@ -206,7 +213,6 @@ int main(void)
   MX_USART6_UART_Init();
   MX_FATFS_Init();
   MX_USB_OTG_FS_HCD_Init();
-  MX_LWIP_Init();
   /* USER CODE BEGIN 2 */
 #else
   /* Generated init functions remain available for later CubeMX work.
@@ -238,6 +244,8 @@ int main(void)
   (void)MX_USB_OTG_FS_HCD_Init;
   MX_GPIO_Init();
 #endif
+  MX_LWIP_Init();
+  AppNet_Init();
   LCD_Grid_Init();
   MicScope_Init();
   /* USER CODE END 2 */
@@ -250,6 +258,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     MX_LWIP_Process();
+    AppNet_Process();
     MicScope_Process();
   }
   /* USER CODE END 3 */

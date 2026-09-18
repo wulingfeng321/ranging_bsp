@@ -1,0 +1,19 @@
+/* STM32F746NG, Flash image for the Discovery board Ethernet test.
+ * Reserve the top 64 KB SRAM for non-cacheable Ethernet storage.
+ * The heap needs MEM_SIZE plus alignment and allocator metadata. */
+define memory mem with size = 4G;
+define region ROM_region = mem:[from 0x08000000 to 0x080FFFFF];
+define region DTCM_region = mem:[from 0x20000000 to 0x2000FFFF];
+define region RAM_region = mem:[from 0x20010000 to 0x2003FFFF];
+define region RX_region = mem:[from 0x20040000 to 0x20047FFF];
+/* 0x20048000..0x2004BFFF: LwIP heap; descriptors use absolute addresses
+ * 0x2004C000 and 0x2004C0A0 in ethernetif.c. */
+define block CSTACK with alignment = 8, size = 0x2000 { };
+define block HEAP with alignment = 8, size = 0x200 { };
+initialize by copy { readwrite };
+do not initialize { section .noinit };
+place at address mem:0x08000000 { readonly section .intvec };
+place in ROM_region { readonly };
+place in DTCM_region { block CSTACK };
+place in RX_region { section .eth_rx_pool };
+place in RAM_region { readwrite, block HEAP };
