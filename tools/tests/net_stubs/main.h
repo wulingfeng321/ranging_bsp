@@ -13,4 +13,7 @@ extern TestRng testRng;
 #define __HAL_RCC_RNG_FORCE_RESET() ((void)0)
 #define __HAL_RCC_RNG_RELEASE_RESET() ((void)0)
 uint32_t HAL_GetTick(void);
+#define __get_PRIMASK() 0U
+#define __disable_irq() ((void)0)
+#define __set_PRIMASK(x) ((void)(x))
 #endif

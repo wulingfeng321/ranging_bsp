@@ -31,6 +31,7 @@
 /* USER CODE BEGIN Include for User BSP */
 #include "lan8742.h"
 #include "app_board_config.h"
+#include "app_range.h"
 /* USER CODE END Include for User BSP */
 #include <string.h>
 
@@ -275,6 +276,7 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p)
   struct pbuf *q = NULL;
   err_t errval = ERR_OK;
   ETH_BufferTypeDef Txbuffer[ETH_TX_DESC_CNT] = {0};
+  uint32_t firstDesc = heth.TxDescList.CurTxDesc;
 
   memset(Txbuffer, 0 , ETH_TX_DESC_CNT*sizeof(ETH_BufferTypeDef));
 
@@ -309,8 +311,39 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p)
   TxConfig.TxBuffer = Txbuffer;
   TxConfig.pData = p;
 
+  /* Timestamp every descriptor in this packet. Blocking HAL leaves the last
+   * used descriptor at CurTxDesc-1; read DESC6/7 before the next transmission.
+   * The bundled HAL GetTxTimestamp reads DESC0/1, so it is not used here. */
+  if (ETH->PTPTSCR & ETH_PTPTSCR_TSE)
+  {
+    uint32_t d;
+    for (d = 0; d < i; ++d)
+    {
+      uint32_t index = (firstDesc + d) % ETH_TX_DESC_CNT;
+      if (DMATxDscrTab[index].DESC0 & ETH_DMATXDESC_OWN) return ERR_IF;
+      DMATxDscrTab[index].DESC0 &= ~ETH_DMATXDESC_TTSS;
+      DMATxDscrTab[index].DESC6 = 0xFFFFFFFFU;
+      DMATxDscrTab[index].DESC7 = 0xFFFFFFFFU;
+      DMATxDscrTab[index].DESC0 |= ETH_DMATXDESC_TTSE;
+    }
+  }
+
   if (HAL_ETH_Transmit(&heth, &TxConfig, ETH_DMA_TRANSMIT_TIMEOUT) == HAL_OK)
+  {
     ++ethTxPackets;
+    if (ETH->PTPTSCR & ETH_PTPTSCR_TSE)
+    {
+      uint32_t last = (heth.TxDescList.CurTxDesc + ETH_TX_DESC_CNT - 1U) % ETH_TX_DESC_CNT;
+      if ((DMATxDscrTab[last].DESC0 & ETH_DMATXDESC_TTSS) &&
+          DMATxDscrTab[last].DESC6 < 1000000000U)
+      {
+        uint32_t sec = DMATxDscrTab[last].DESC7;
+        uint32_t ns = DMATxDscrTab[last].DESC6;
+        rangeTxTimestamp = (uint64_t)sec * 1000000000ULL + ns;
+        ++rangeTxStampSerial;
+      }
+    }
+  }
   else
   {
     ++ethTxErrors;
@@ -335,6 +368,12 @@ static struct pbuf * low_level_input(struct netif *netif)
   if((heth.gState == HAL_ETH_STATE_STARTED) && (RxAllocStatus == RX_ALLOC_OK))
   {
     HAL_ETH_ReadData(&heth, (void **)&p);
+    if (p != NULL)
+    {
+      uint32_t ns = heth.RxDescList.TimeStamp.TimeStampLow;
+      rangeRxTimestamp = ns < 1000000000U ?
+        (uint64_t)heth.RxDescList.TimeStamp.TimeStampHigh * 1000000000ULL + ns : 0;
+    }
   }
 
   return p;

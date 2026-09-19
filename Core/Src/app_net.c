@@ -26,6 +26,8 @@ static uint64_t session, peerSession;
 static uint32_t seq, helloSeq, testSeq, testValue, testSent;
 static uint32_t lastRx, lastSend, peerSeq;
 static uint8_t helloPending, testPending, havePeerSeq;
+uint64_t AppNet_LocalSession(void) { return session; }
+uint64_t AppNet_PeerSession(void) { return peerSession; }
 
 static void Put32(uint8_t *p, uint32_t v)
 {

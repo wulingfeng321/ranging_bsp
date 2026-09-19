@@ -10,7 +10,9 @@ typedef struct { uint32_t value; } ip_addr_t;
 #define IP_ADDR_ANY ((const ip_addr_t *)0)
 #define IP_ADDR4(p,a,b,c,d) ((p)->value = ((uint32_t)(a)<<24)|((b)<<16)|((c)<<8)|(d))
 #define ip_addr_cmp(a,b) ((a)->value == (b)->value)
-struct pbuf { uint16_t tot_len; uint8_t bytes[64]; };
+struct pbuf { uint16_t tot_len; uint8_t bytes[128]; };
+typedef ip_addr_t ip4_addr_t;
+#define ip_2_ip4(p) (p)
 struct udp_pcb { int unused; };
 struct pbuf *pbuf_alloc(int layer, uint16_t size, int type);
 void pbuf_free(struct pbuf *p);

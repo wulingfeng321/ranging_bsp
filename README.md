@@ -1,10 +1,18 @@
 # ranging_bsp · 双开发板声学测距
 
+## 最新版本：BOARD RANGE TEST3（2026-09-19）
+
+已实现双板测距和声源 A/B 侧别显示，上板方向已确认正确；约 18 cm 测试仍存在偏差和波动，尚未完成精度验收。TEST3 新增 32 点音频时基拟合与异常回调剔除，主机测试和 A/B IAR 编译通过，现场效果待验证。以下早期阶段说明与历史记录如有差异，以本段、当前源码及 [TEST3 说明](commit_logs/2026-09-19_audio-time-model.md) 为准。
+
+当前源码默认角色为 B。分别设置 `Core/Inc/app_board_config.h` 中的 `APP_BOARD_ROLE` 并编译两板；声源与两个 L 麦克风共线且位于两板外侧，等待 `SYNC READY`、`AT:OK` 后测试。结果保留 15 秒，断线、失锁或音频错误仍清除结果。
+
+本机最新固件为 `EWARM/ranging_bsp/Exe/ranging_board_test3_A.hex/.out` 和 B 对应文件；构建产物按 `.gitignore` 不提交到仓库。请用 IAR 从当前源码生成固件，不要使用历史 UDP/DIAG 固件。工程部分 BSP/字体依赖位于仓库外，构建环境要求见下文。
+
 基于 STM32746G-Discovery（STM32F746G-DISCO）的声学测距项目，使用 STM32CubeMX 生成基础工程，IAR 编译调试，BSP 驱动板载 LCD 和双麦克风。
 
-当前阶段：**单板音频采集、波形显示与测距结果 UI 已有实现；开发者已验证 ping 成功；双板 UDP 握手、心跳和测试应答已有源码，待两板验收；时钟同步和距离计算待开发。**
+当前阶段：**开发者已确认双板 UDP 正常通信。已加入指定扫频的实验版双板测距：ETH 硬件时间戳、偏移/频漂拟合、音频模板检测、事件配对和两屏距离/方向发布；本次测距尚待上板验证，不代表精度指标达标。**
 
-双板配置：修改 `Core/Inc/app_board_config.h` 的 `APP_BOARD_ROLE`，A 使用 `APP_BOARD_A`（192.168.10.10），B 使用 `APP_BOARD_B`（192.168.10.11，默认）。MAC 与对端地址随角色自动切换，UDP 端口为 5000。两台均需烧录本协议固件；屏幕显示 ONLINE 且 OK 计数增长表示双向测试应答成功。构建、消息格式及排查见 [双板 UDP 说明](commit_logs/2026-09-18_dual-board-udp.md)。
+双板配置：修改 `Core/Inc/app_board_config.h` 的 `APP_BOARD_ROLE`，A 使用 `APP_BOARD_A`（192.168.10.10，当前默认），B 使用 `APP_BOARD_B`（192.168.10.11）。MAC 与对端地址随角色自动切换，UDP 5000 用于通信状态，5001 用于测距。两台均需更新固件；ONLINE/OK 只表示网络业务通信，SYNC READY 是内部拟合状态。播放方式、参数、硬件边界与验证见 [扫频测距说明](commit_logs/2026-09-18_chirp-ranging.md)，原通信协议见 [双板 UDP 说明](commit_logs/2026-09-18_dual-board-udp.md)。
 
 本文更新于 2026-09-18，代码基线为 `89abe36`（启用 LwIP，开发板 IP 为 192.168.10.10）。上板波形效果及 ping 连通性由开发者确认；这不等于已完成双板同步或测距验收。
 

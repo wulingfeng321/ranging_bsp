@@ -1102,6 +1102,10 @@
         <file>
           <name>$PROJ_DIR$\..\Core\Src\app_net.c</name>
         </file>
+        <file><name>$PROJ_DIR$\..\Core\Src\app_range.c</name></file>
+        <file><name>$PROJ_DIR$\..\Core\Src\range_clock.c</name></file>
+        <file><name>$PROJ_DIR$\..\Core\Src\range_dsp.c</name></file>
+        <file><name>$PROJ_DIR$\..\Core\Src\range_sync.c</name></file>
         <file>
           <name>$PROJ_DIR$\..\Core\Src\main.c</name>
         </file>

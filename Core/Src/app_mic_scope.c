@@ -1,5 +1,6 @@
 #include "app_mic_scope.h"
 #include "app_net.h"
+#include "app_range.h"
 #include "app_board_config.h"
 #include "stm32746g_discovery_audio.h"
 #include "stm32746g_discovery_lcd.h"
@@ -14,8 +15,8 @@
 #define HALF_FRAMES      256U
 #define DMA_WORDS        (HALF_FRAMES * 2U * 2U)
 #define PLOT_WIDTH       480U
-#define REFRESH_MS       40U
-#define RESULT_TIMEOUT_MS 5000U
+#define REFRESH_MS       150U
+#define RESULT_TIMEOUT_MS APP_RANGE_RESULT_HOLD_MS
 #define PLOT_AMPLITUDE    28
 #define FRAME_A          0xC0000000U
 #define FRAME_B          0xC0080000U
@@ -86,20 +87,21 @@ static void DrawDashboard(uint32_t now)
                   now - resultTick < RESULT_TIMEOUT_MS;
   BSP_LCD_SetBackColor(LCD_COLOR_BLACK);
   BSP_LCD_SetFont(&Font16);
-  Text(12, 4, "ACOUSTIC RANGING", LCD_COLOR_CYAN);
+  Text(12, 4, "BOARD RANGE TEST3", LCD_COLOR_CYAN);
   BSP_LCD_SetFont(&Font12);
   (void)snprintf(netText, sizeof(netText), "%s NET %s OK:%lu", APP_BOARD_NAME,
                  appNetStatus.initError ? "ERROR" :
                  (appNetStatus.online ? "ONLINE" : "WAIT"),
                  (unsigned long)appNetStatus.testAck);
   Text(250, 4, netText, appNetStatus.online ? LCD_COLOR_GREEN : LCD_COLOR_YELLOW);
-  Text(12, 27, "BOARD DISTANCE", LCD_COLOR_WHITE);
+  Text(12, 27, "A(L) - B(L) DISTANCE", LCD_COLOR_WHITE);
   if (fresh)
   {
     (void)snprintf(value, sizeof(value), "%lu.%03lu m",
                    (unsigned long)(distanceMm / 1000U),
                    (unsigned long)(distanceMm % 1000U));
-    state = "VALID RESULT";
+    state = appRangeStatus.direction > 0 ? "SOURCE: A SIDE" :
+            (appRangeStatus.direction < 0 ? "SOURCE: B SIDE" : "SOURCE: UNKNOWN");
     color = LCD_COLOR_GREEN;
   }
   else
@@ -111,14 +113,80 @@ static void DrawDashboard(uint32_t now)
   }
   BSP_LCD_SetFont(&Font24);
   Text(12, 44, value, color);
-  BSP_LCD_SetFont(&Font12);
+  BSP_LCD_SetFont(fresh ? &Font16 : &Font12);
   Text(250, 29, state, color);
-  Text(250, 47, audioStatus, started ? LCD_COLOR_CYAN : LCD_COLOR_RED);
-  Text(250, 63, holdState == 2 ? "WAVE HOLD" :
-       (holdState == 1 ? "TRIGGER: WAIT END" : "WAVE LIVE"), LCD_COLOR_YELLOW);
-  Text(12, 78, "L/R | 160ms | 20ms/div | SWEEP | AUTO", LCD_COLOR_WHITE);
+  BSP_LCD_SetFont(&Font12);
+  if(fresh)
+  {
+    Text(250,47,appRangeStatus.direction>0 ? "SOUND >>> A --- B" :
+      (appRangeStatus.direction<0 ? "A --- B <<< SOUND" : "ARRIVAL SIDE UNCERTAIN"),
+      LCD_COLOR_CYAN);
+    if(APP_BOARD_ROLE==APP_BOARD_A)
+    {
+      (void)snprintf(netText,sizeof(netText),"RAW B-A:%+ldus",
+                     (long)appRangeStatus.resultDeltaUs);
+      Text(250,63,netText,LCD_COLOR_YELLOW);
+    }
+    else Text(250,63,"COLLINEAR / OUTSIDE",LCD_COLOR_YELLOW);
+  }
+  else
+  {
+    Text(250,47,audioStatus,started ? LCD_COLOR_CYAN : LCD_COLOR_RED);
+    Text(250,63,"SETUP: SOUND--A--B",LCD_COLOR_YELLOW);
+  }
+  (void)snprintf(netText, sizeof(netText), "SYNC %s AT:%s Q:%lu",
+                 (appRangeStatus.error==-1 || appRangeStatus.error==-2) ? "ERROR" :
+                 (appRangeStatus.locked ? "READY" : "WAIT"),
+                 appRangeStatus.audioTimeReady ? "OK" : "WAIT",
+                 (unsigned long)appRangeStatus.quality);
+  Text(12, 78, netText, appRangeStatus.locked ? LCD_COLOR_GREEN : LCD_COLOR_YELLOW);
+  (void)snprintf(netText, sizeof(netText), "T:%ldC EVT:%lu",
+                 (long)(APP_TEMPERATURE_DECI_C/10), (unsigned long)appRangeStatus.events);
+  Text(280, 78, netText, LCD_COLOR_WHITE);
   BSP_LCD_SetTextColor(0xFF404040U);
   BSP_LCD_DrawHLine(0, 95, PLOT_WIDTH);
+}
+
+/* Fit diagnostics beside the microphone labels, above the waveform grid.
+ * LCD counters wrap at 10000; Watch retains full cumulative counters. */
+static void DrawRangeDiagnostics(void)
+{
+  char text[64], delta[16];
+  BSP_LCD_SetFont(&Font12);
+  BSP_LCD_SetBackColor(LCD_COLOR_BLACK);
+  (void)snprintf(text,sizeof(text),"D:%lu G:%lu O:%lu EQ:%lu",
+    (unsigned long)(appRangeStatus.audioDrops%10000U),
+    (unsigned long)(appRangeStatus.audioGapDrops%10000U),
+    (unsigned long)(appRangeStatus.audioOverruns%10000U),
+    (unsigned long)appRangeStatus.eventQuality);
+  Text(120,96,text,LCD_COLOR_YELLOW);
+  /* Alternate with the existing counters, keeping the waveform area free. */
+  if((HAL_GetTick()/2000U)&1U) {
+    BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
+    BSP_LCD_FillRect(120,96,360,12);
+    (void)snprintf(text,sizeof(text),"AJ:%luus PS:%lu EQ:%lu",
+      (unsigned long)(appRangeStatus.audioJitterNs/1000U),
+      (unsigned long)appRangeStatus.eventPeakSpreadSamples,
+      (unsigned long)appRangeStatus.eventQuality);
+    Text(120,96,text,LCD_COLOR_YELLOW);
+  }
+  if(APP_BOARD_ROLE==APP_BOARD_A)
+  {
+    if(appRangeStatus.pairDeltaValid)
+      (void)snprintf(delta,sizeof(delta),"%ld",(long)appRangeStatus.pairDeltaUs);
+    else (void)snprintf(delta,sizeof(delta),"--");
+    (void)snprintf(text,sizeof(text),"RX:%lu DT:%sus R:%lu J:%lu",
+      (unsigned long)(appRangeStatus.eventRx%10000U),delta,
+      (unsigned long)(appRangeStatus.results%10000U),
+      (unsigned long)(appRangeStatus.rejected%10000U));
+  }
+  else
+    (void)snprintf(text,sizeof(text),"TX:%lu ACK:%lu R:%lu J:%lu",
+      (unsigned long)(appRangeStatus.eventTxAttempts%10000U),
+      (unsigned long)(appRangeStatus.eventAck%10000U),
+      (unsigned long)(appRangeStatus.results%10000U),
+      (unsigned long)(appRangeStatus.rejected%10000U));
+  Text(120,184,text,LCD_COLOR_YELLOW);
 }
 
 /* Called only for the DMA half that has finished receiving. */
@@ -127,6 +195,7 @@ static void StoreHalf(uint32_t wordOffset)
   uint32_t i;
   uint32_t pos = writeFrame;
   const volatile int16_t *src = (const volatile int16_t *)AUDIO_BUFFER;
+  AppRange_Audio(src + wordOffset, HALF_FRAMES);
   for (i = 0; i < HALF_FRAMES; ++i)
   {
     history[pos][0] = src[wordOffset + 2U * i];
@@ -142,7 +211,7 @@ static void StoreHalf(uint32_t wordOffset)
 
 void BSP_AUDIO_IN_HalfTransfer_CallBack(void) { StoreHalf(0); }
 void BSP_AUDIO_IN_TransferComplete_CallBack(void) { StoreHalf(HALF_FRAMES * 2U); }
-void BSP_AUDIO_IN_Error_CallBack(void) { ++micErrors; }
+void BSP_AUDIO_IN_Error_CallBack(void) { ++micErrors; AppRange_AudioError(); }
 
 void MicScope_Init(void)
 {
@@ -232,11 +301,12 @@ void MicScope_Process(void)
   if (started && (micErrors || haudio_in_sai.ErrorCode || now - lastReceived > 1000U))
   {
     audioStatus = "MIC DATA ERROR";
+    AppRange_AudioError();
     started = 0;
     holdState = 0;
   }
   if (now - lastDraw < REFRESH_MS ||
-      (LTDC->SRCR & LTDC_SRCR_VBR)) return;
+      (LTDC->SRCR & LTDC_SRCR_VBR) || !AppRange_DisplayReady()) return;
   lastDraw = now;
 
   if (started && validFrames >= WINDOW_FRAMES)
@@ -248,9 +318,9 @@ void MicScope_Process(void)
       rearmTick = now;
     }
     if (rearmWaiting && now - rearmTick >= 160U) rearmWaiting = 0;
-    /* Short coherent copy; never keep interrupts masked during LCD drawing. */
-    irqMask = __get_PRIMASK();
-    __disable_irq();
+    /* Do not mask DMA interrupts during the waveform copy: their arrival
+     * anchors are used for ranging. Retry next frame if an ISR changed data. */
+    irqMask = micDmaBlocks;
     /* Copy in physical slot order, not oldest-to-newest order. Both channels
      * and the cursor are captured together so they cannot drift apart. */
     sweepColumn = writeFrame * PLOT_WIDTH / WINDOW_FRAMES;
@@ -261,7 +331,8 @@ void MicScope_Process(void)
       snapshot[i][0] = history[i][0];
       snapshot[i][1] = history[i][1];
     }
-    __set_PRIMASK(irqMask);
+    __DMB();
+    if (irqMask != micDmaBlocks) return;
     if (holdState == 1 && capturedSweep != triggerSweep)
     {
       holdState = 2;
@@ -305,6 +376,7 @@ void MicScope_Process(void)
   {
     DrawChannel(0, mean[0], scale);
     DrawChannel(1, mean[1], scale);
+    DrawRangeDiagnostics();
   }
   else
   {

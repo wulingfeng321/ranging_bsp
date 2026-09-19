@@ -12,4 +12,6 @@ typedef struct {
 extern AppNetStatus appNetStatus;
 void AppNet_Init(void); /* Once, after MX_LWIP_Init. */
 void AppNet_Process(void);
+uint64_t AppNet_LocalSession(void);
+uint64_t AppNet_PeerSession(void);
 #endif

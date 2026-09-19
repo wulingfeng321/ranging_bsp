@@ -41,6 +41,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app_net.h"
+#include "app_range.h"
 #include "stm32746g_discovery_lcd.h"
 #include "app_mic_scope.h"
 /* USER CODE END Includes */
@@ -246,6 +247,7 @@ int main(void)
 #endif
   MX_LWIP_Init();
   AppNet_Init();
+  AppRange_Init();
   LCD_Grid_Init();
   MicScope_Init();
   /* USER CODE END 2 */
@@ -259,6 +261,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
     MX_LWIP_Process();
     AppNet_Process();
+    AppRange_Process();
     MicScope_Process();
   }
   /* USER CODE END 3 */
