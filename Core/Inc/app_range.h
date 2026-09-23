@@ -18,6 +18,11 @@ typedef struct {
   uint32_t audioJitterNs, samplePeriodPs, audioTimingRejected;
   uint8_t audioTimeReady;
   uint32_t eventPeakSpreadSamples;
+  uint32_t batchStage, batchCount, batchUsed, batchSpanMm;
+  uint32_t batchCadenceRejected;
+  uint8_t resultIsStat; /* 0 single-shot preview, 1 accepted batch estimate. */
+  uint32_t peakAmbiguous, peakInconsistent, peakCandidates, peakPairSpreadNs;
+  uint8_t peakUncertain; /* Last compared event rejected; old display is not refreshed. */
 } AppRangeStatus;
 extern AppRangeStatus appRangeStatus;
 void AppRange_Init(void);

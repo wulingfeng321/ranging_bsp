@@ -39,6 +39,32 @@ assert find([int(12000*math.sin(i*2*math.pi*4000/16000)) for i in range(2048)]) 
 wrong=list(sig); wrong[640:1152]=sig[:512]
 assert find(wrong+[0]*256) is None
 assert find(list(sig[:512])+[0]*(2048-512)) is None
+with wave.open(str(root/'tools/test_audio_wide_repeat.wav'),'rb') as w:
+    wide=struct.unpack('<'+'h'*2048,w.readframes(2048))
+assert find(wide) is None # Wrong audio profile must not produce a legacy event.
+
+# Scan the entire three-repeat WAV using the firmware's 256-sample advance
+# and 4000-sample refractory period, including all inter-group silence.
+with wave.open(str(root/'tools/test_audio_chirp_repeat.wav'),'rb') as w:
+    assert (w.getframerate(),w.getnchannels(),w.getsampwidth())==(16000,1,2)
+    repeat=struct.unpack('<'+'h'*w.getnframes(),w.readframes(w.getnframes()))
+expected=[group*64000+i*8000 for group in range(3) for i in range(5)]
+for offset in [0,17,127,254]:
+    stream=[0]*offset+list(repeat)+[0]*2048
+    detected=[]
+    for base in range(0,len(stream)-2047,256):
+        x=(c.c_int16*2048)(*stream[base:base+2048])
+        pos=c.c_float(); q=c.c_uint32()
+        for scan in range(0,256,64):
+            if detected and base+scan<=int(detected[-1])+4000:
+                continue
+            if lib.RangeDsp_Find(x,scan,scan+64,c.byref(pos),c.byref(q)):
+                at=base+pos.value
+                if not detected or int(at)>int(detected[-1])+4000:
+                    detected.append(at)
+    assert len(detected)==15,(offset,detected)
+    assert all(abs(got-(start+offset))<0.6 for got,start in zip(detected,expected)),(offset,detected)
+print('PASS: full repeat WAV, 15 events, four stream alignments, no gap detections')
 
 # Bring-up profile accepts a clean weak signature (~51 PCM RMS), below the
 # original 64 RMS floor, while the rejection cases above must still pass.

@@ -1,9 +1,19 @@
 /* Actual ranging state machine, with deterministic transport and hardware clock. */
+#ifndef APP_RANGE_JOINT_PEAKS
+#define APP_RANGE_JOINT_PEAKS 0 /* This suite exercises the original EVENT protocol. */
+#endif
+#ifndef APP_RANGE_STATISTICS
+#define APP_RANGE_STATISTICS 0 /* Legacy single-result regression suite. */
+#endif
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include "../../Core/Src/app_range.c"
+#if APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_LEGACY
 #include "range_template.h"
+#else
+#include "range_template_wide.h"
+#endif
 struct netif gnetif={1};
 AppNetStatus appNetStatus;
 uint64_t rangeRxTimestamp, rangeTxTimestamp;
@@ -12,6 +22,7 @@ static uint64_t clockNs=10000000000ULL;
 static struct udp_pcb fakePcb;
 static int balance, displays;
 static uint8_t sent[72];
+static uint64_t testPayloadU,testPayloadV;
 static uint32_t tickAdvanceMs;
 uint32_t HAL_GetTick(void)
 {
@@ -52,6 +63,7 @@ static void Inject(uint8_t type,uint32_t id,uint32_t epoch,uint64_t x,uint64_t y
   p->bytes[4]=2;p->bytes[5]=type;p->bytes[6]=APP_PEER_ROLE;p->bytes[7]=72;
   P64(p->bytes+8,222);P64(p->bytes+16,111);P32(p->bytes+24,id);P32(p->bytes+28,epoch);
   P64(p->bytes+32,x);P64(p->bytes+40,y);P64(p->bytes+48,z);
+  P64(p->bytes+56,testPayloadU);P64(p->bytes+64,testPayloadV);
   rangeRxTimestamp=clockNs;Receive(NULL,pcb,p,&peer,5001);assert(balance==0);
 }
 int main(void)
@@ -116,8 +128,8 @@ int main(void)
         int32_t at=(int32_t)((n+k)%8000)-129;
         int16_t v=0;
         if(at>=0 && at<512) v=rangeUp[at];
-        else if(at>=640 && at<1152) v=rangeDown[at-640];
-        else if(at>=1280 && at<1792) v=rangeUp[at-1280];
+        else if(at>=RANGE_PULSE_STEP && at<RANGE_PULSE_STEP+512) v=rangeDown[at-RANGE_PULSE_STEP];
+        else if(at>=2*RANGE_PULSE_STEP && at<2*RANGE_PULSE_STEP+512) v=rangeUp[at-2*RANGE_PULSE_STEP];
         pcm[k*2]=v;pcm[k*2+1]=0;
       }
       clockNs=20000000000ULL+(uint64_t)(n+256)*62500ULL;
@@ -155,8 +167,8 @@ int main(void)
     memset(window,0,sizeof(window));
     for(k=0;k<512;++k)
     {
-      window[17+k]=rangeUp[k]; window[17+640+k]=rangeDown[k];
-      window[17+1280+k]=rangeUp[k];
+      window[17+k]=rangeUp[k]; window[17+RANGE_PULSE_STEP+k]=rangeDown[k];
+      window[17+2*RANGE_PULSE_STEP+k]=rangeUp[k];
     }
     stamp=windowAnchorNs-(2048ULL-17)*62500ULL;
     if(APP_BOARD_ROLE==APP_BOARD_A)

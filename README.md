@@ -1,5 +1,39 @@
 # ranging_bsp · 双开发板声学测距
 
+## 当前版本：旧音频 JOINT2 联合选峰（2026-09-21）
+
+当前选择 `APP_RANGE_AUDIO_LEGACY`，使用旧 `tools/test_audio_chirp_repeat.wav`。
+新增 `APP_RANGE_JOINT_PEAKS` 默认在旧音频下开启：两板各发送最多三个候选峰，A 板检查三段
+时间差一致性并拒绝接近评分的多解，不再将每块板独立选择的峰直接相减。
+JOINT2 允许三段各自在联合峰附近 ±1 样点内寻找局部峰，并合并重复候选，修复 JOINT1
+要求三段峰位于同一个整数采样点而频繁拒绝的问题。时间差一致性和歧义阈值保持不变。
+屏幕显示 `RANGE JOINT2`；歧义显示 `PEAK UNCERTAIN`，不发布新距离。
+两板均须更新 `ranging_legacy_joint2_A/B.hex/.out`，详见 [JOINT2 修复说明](commit_logs/2026-09-21_joint2-tolerance.md)。
+
+## 保留的 WIDE / LEGACY 音频切换
+
+`Core/Inc/app_board_config.h` 中的 `APP_RANGE_AUDIO_PROFILE` 可设为 `APP_RANGE_AUDIO_WIDE`，
+播放新增的 `tools/test_audio_wide_repeat.wav`；改为 `APP_RANGE_AUDIO_LEGACY` 即恢复旧检测器和旧音频。
+两板必须使用相同配置。新方案采用 1.5～6.5 kHz 平滑扫频、三脉冲一致性和较早可信峰筛选；
+旧 WAV 与旧模板保留。新旧方案均使用以下 STAT4 统计逻辑。
+
+新固件：`EWARM/ranging_bsp/Exe/ranging_wide_A/B.hex/.out`；旧方案固件：`ranging_legacy_A/B.hex/.out`。
+完整切换方法、生成/构建脚本、验证和局限见 [音频方案说明](commit_logs/2026-09-21_wide-audio-profile.md)。
+主机模拟不能替代真实反射环境测试，尚未验证绝对精度及新算法的板上实时处理余量。
+
+## STAT4 批次统计（两种音频共用）
+
+STAT4 修复单侧异常值导致有效样本被错误剔除的问题：选择跨度不超过 40 mm 的最大样本簇，
+至少保留 6 个且占本轮样本的 60%，最终距离在 100～200 mm 时发布绿色统计结果。
+绿色结果在原有 15 秒有效期内不会被后续黄色单次预览覆盖，新一轮有效统计可更新它。
+两板均须更新 `EWARM/ranging_bsp/Exe/ranging_stat4_A.hex/.out` 和 B 对应固件。
+使用及验证见 [STAT4 修复说明](commit_logs/2026-09-21_repeat-cluster-fix.md)。
+
+针对三次重复的测试音频，每轮最多收集 15 次测量，进行节拍检查、聚类及簇内中位数估计。
+使用 `tools/test_audio_chirp_repeat.wav`，从首次成功配对起等待 11 秒收集窗口结束再开始下一轮。
+历史中位数/MAD 方案见 [原统计说明](commit_logs/2026-09-19_repeat-statistics.md)，当前规则以 STAT4 为准。
+目标工作距离为 10～20 cm，但 ±10 mm 绝对精度尚未验证；统计不能消除固定偏差。以下 TEST3 为前一版记录。
+
 ## 最新版本：BOARD RANGE TEST3（2026-09-19）
 
 已实现双板测距和声源 A/B 侧别显示，上板方向已确认正确；约 18 cm 测试仍存在偏差和波动，尚未完成精度验收。TEST3 新增 32 点音频时基拟合与异常回调剔除，主机测试和 A/B IAR 编译通过，现场效果待验证。以下早期阶段说明与历史记录如有差异，以本段、当前源码及 [TEST3 说明](commit_logs/2026-09-19_audio-time-model.md) 为准。

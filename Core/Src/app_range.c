@@ -5,6 +5,16 @@
 #include "range_dsp.h"
 #include "range_sync.h"
 #include "range_audio_time.h"
+#if APP_RANGE_JOINT_PEAKS
+#include "range_peak_pair.h"
+#endif
+#if APP_RANGE_STATISTICS
+#include "range_batch.h"
+static RangeBatch batch;
+static uint32_t batchStateMs, batchStateId;
+static uint32_t batchResultFloor;
+static uint64_t batchFirstEventNs, batchLastEventNs;
+#endif
 #include "main.h"
 #include "lwip/udp.h"
 #include "lwip/etharp.h"
@@ -18,6 +28,9 @@
 #define EVENT 5U
 #define RESULT 6U
 #define ACK 7U
+#define BATCH_STATE 8U
+#define PEAK_EVENT 9U
+#define PEAK_STATE 10U
 #define AUDIO_RING 8192U
 extern struct netif gnetif;
 AppRangeStatus appRangeStatus;
@@ -46,13 +59,24 @@ typedef struct {
   uint64_t time;
   uint32_t id, quality, received;
   uint8_t used;
+#if APP_RANGE_JOINT_PEAKS
+  RangePeaks peaks;
+#endif
 } Detection;
+#if APP_RANGE_JOINT_PEAKS
+static RangePeaks pendingPeaks, detectedPeaks;
+static uint32_t peakStateMs,peakStateId;
+#endif
 static Detection localEvents[4], remoteEvents[4];
 static uint32_t localIndex, remoteIndex;
 static uint64_t pendingEventTime;
-static uint32_t pendingEventId, pendingEventQuality, eventRetry, eventStart;
+static uint32_t pendingEventId, eventRetry, eventStart;
+#if !APP_RANGE_JOINT_PEAKS
+static uint32_t pendingEventQuality;
+#endif
 static uint32_t pendingResultId, resultRetry, resultStart;
 static uint32_t resultMm, resultQuality, resultSide;
+static uint32_t txResultMm, txResultQuality, txResultSide, txResultKind;
 
 static void P32(uint8_t *p, uint32_t v)
 { p[0]=(uint8_t)(v>>24); p[1]=(uint8_t)(v>>16); p[2]=(uint8_t)(v>>8); p[3]=(uint8_t)v; }
@@ -88,9 +112,19 @@ static uint64_t Send(uint8_t type, uint32_t id, uint32_t epoch,
 
 static void ClearMeasurements(void)
 {
+#if APP_RANGE_STATISTICS
+  RangeBatch_Reset(&batch);
+  appRangeStatus.batchStage=0; appRangeStatus.batchCount=0;
+  appRangeStatus.batchUsed=0; appRangeStatus.batchSpanMm=0; batchStateId=0;
+  batchResultFloor=0;
+#endif
   memset(localEvents,0,sizeof(localEvents)); memset(remoteEvents,0,sizeof(remoteEvents));
   pendingEventId=0; pendingResultId=0; appRangeStatus.valid=0;
   appRangeStatus.pairDeltaValid=0;
+  appRangeStatus.peakUncertain=0;
+#if APP_RANGE_JOINT_PEAKS
+  peakStateId=0;
+#endif
   MicScope_SetRangeState(MIC_SCOPE_RANGE_WAITING);
 }
 
@@ -107,6 +141,12 @@ static void DisplayResult(uint32_t id, uint32_t mm, uint32_t side, uint32_t qual
   appRangeStatus.resultId=id; appRangeStatus.distanceMm=mm;
   appRangeStatus.direction=side==1 ? 1 : (side==2 ? -1 : 0);
   appRangeStatus.quality=quality; appRangeStatus.valid=1;
+#if APP_RANGE_JOINT_PEAKS
+  if(APP_BOARD_ROLE==APP_BOARD_A || !peakStateId || id-peakStateId<0x80000000UL)
+#endif
+  appRangeStatus.peakUncertain=0;
+  txResultMm=mm; txResultQuality=quality; txResultSide=side;
+  txResultKind=appRangeStatus.resultIsStat;
   ++appRangeStatus.results; lastResultMs=HAL_GetTick();
   MicScope_SetDistanceMm(mm);
 }
@@ -144,6 +184,31 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
       appRangeStatus.syncErrorNs=(uint32_t)y; lastStateMs=now;
       return;
     }
+#if APP_RANGE_JOINT_PEAKS
+    if(type==PEAK_EVENT && appRangeStatus.locked && epoch==peerEpoch) {
+      RangePeaks peaks;
+      uint64_t masterNow=RangeClock_Now();
+      uint32_t count=(uint32_t)(y&255),quality=0;
+      /* y: profile (bits 16..23), overflow (bit 8), candidate count (0..7). */
+      if((y&~0xFF01FFULL)!=0 || ((y>>16)&255)!=APP_RANGE_AUDIO_PROFILE ||
+         !count || count>3 || x>masterNow || masterNow-x>1500000000ULL) goto reject;
+      memset(&peaks,0,sizeof(peaks)); peaks.count=count; peaks.overflow=(uint32_t)((y>>8)&1);
+      for(i=0;i<3;++i) {
+        uint64_t word=G64(bytes+48+8*i);
+        if(i>=count) { if(word) goto reject; continue; }
+        if(!RangePeak_Unpack(word,&peaks.peak[i])) goto reject;
+        if(peaks.peak[i].quality>quality) quality=peaks.peak[i].quality;
+      }
+      for(i=0;i<4;++i) if(remoteEvents[i].id==id && remoteEvents[i].time==x) {
+        Send(ACK,id,epoch,PEAK_EVENT,0,0,0,0); return;
+      }
+      remoteEvents[remoteIndex].time=x; remoteEvents[remoteIndex].id=id;
+      remoteEvents[remoteIndex].quality=quality; remoteEvents[remoteIndex].received=now;
+      remoteEvents[remoteIndex].peaks=peaks; remoteEvents[remoteIndex].used=1;
+      remoteIndex=(remoteIndex+1)%4; ++appRangeStatus.eventRx;
+      Send(ACK,id,epoch,PEAK_EVENT,0,0,0,0); return;
+    }
+#else
     if (type==EVENT && appRangeStatus.locked && epoch==peerEpoch &&
         y>=APP_RANGE_MIN_QUALITY && y<=1000)
     {
@@ -158,11 +223,38 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
       ++appRangeStatus.eventRx;
       Send(ACK,id,epoch,EVENT,0,0,0,0); return;
     }
+#endif
     if (type==ACK && x==RESULT && id==pendingResultId && epoch==peerEpoch)
     { pendingResultId=0; return; }
   }
   else
   {
+#if APP_RANGE_JOINT_PEAKS
+    if(type==PEAK_STATE && appRangeStatus.locked && epoch==syncEpoch && x<=1 &&
+       y<=UINT32_MAX && z<=UINT32_MAX && G64(bytes+56)<=3 && G64(bytes+64)<=APP_RANGE_PEAK_SPREAD_NS) {
+      if(peakStateId && (id==peakStateId || id-peakStateId>=0x80000000UL)) goto reject;
+      if(appRangeStatus.resultId && id-appRangeStatus.resultId>=0x80000000UL) goto reject;
+      peakStateId=id; appRangeStatus.peakUncertain=(uint8_t)x;
+      appRangeStatus.peakAmbiguous=(uint32_t)y; appRangeStatus.peakInconsistent=(uint32_t)z;
+      appRangeStatus.peakCandidates=(uint32_t)G64(bytes+56);
+      appRangeStatus.peakPairSpreadNs=(uint32_t)G64(bytes+64);
+      return;
+    }
+#endif
+#if APP_RANGE_STATISTICS
+    if(type==BATCH_STATE && appRangeStatus.locked && epoch==syncEpoch &&
+       x<=5 && y<=15 && z<=y && G64(bytes+56)<=10000 && G64(bytes+64)<=UINT32_MAX)
+    {
+      if(batchStateId && (id-batchStateId==0 || id-batchStateId>=0x80000000UL)) goto reject;
+      if(appRangeStatus.resultId && id-appRangeStatus.resultId>=0x80000000UL) goto reject;
+      batchStateId=id;
+      batchResultFloor=(uint32_t)G64(bytes+64);
+      appRangeStatus.batchStage=(uint32_t)x; appRangeStatus.batchCount=(uint32_t)y;
+      appRangeStatus.batchUsed=(uint32_t)z; appRangeStatus.batchSpanMm=(uint32_t)G64(bytes+56);
+      if(x==0) { appRangeStatus.valid=0; MicScope_SetRangeState(MIC_SCOPE_RANGE_WAITING); }
+      return;
+    }
+#endif
     if (type==SYNC_RESP && pendingRequest && id==requestId && epoch==syncEpoch && rx && x)
     { a2=x; b4=rx; haveResponse=1; return; }
     if (type==SYNC_FOLLOW && pendingRequest && haveResponse && id==requestId && epoch==syncEpoch)
@@ -178,12 +270,17 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
       }
       return;
     }
-    if (type==ACK && x==EVENT && id==pendingEventId && epoch==syncEpoch)
+    if (type==ACK && x==(APP_RANGE_JOINT_PEAKS ? PEAK_EVENT:EVENT) && id==pendingEventId && epoch==syncEpoch)
     { pendingEventId=0; ++appRangeStatus.eventAck; return; }
     if (type==RESULT && appRangeStatus.locked && epoch==syncEpoch && x<=5000 && y<=2 && z<=1000)
     {
+#if APP_RANGE_STATISTICS
+      if(batchStateId && appRangeStatus.batchStage!=2 && id-batchStateId>=0x80000000UL && id!=batchResultFloor) goto reject;
+#endif
       if (appRangeStatus.resultId && id!=appRangeStatus.resultId &&
           id-appRangeStatus.resultId>=0x80000000UL) goto reject;
+      if(G64(bytes+56)>1) goto reject;
+      if(id!=appRangeStatus.resultId) appRangeStatus.resultIsStat=(uint8_t)G64(bytes+56);
       DisplayResult(id,(uint32_t)x,(uint32_t)y,(uint32_t)z);
       Send(ACK,id,epoch,RESULT,0,0,0,0); return;
     }
@@ -220,12 +317,30 @@ static void DetectionReady(uint64_t stamp, uint32_t quality)
   {
     localEvents[localIndex].time=stamp; localEvents[localIndex].id=++sequence;
     localEvents[localIndex].quality=quality; localEvents[localIndex].received=now;
+#if APP_RANGE_JOINT_PEAKS
+    localEvents[localIndex].peaks=detectedPeaks;
+#endif
     localEvents[localIndex].used=1; localIndex=(localIndex+1)%4;
   }
   else
   {
     pendingEventTime=RangeSync_Master(&syncModel,stamp);
-    pendingEventId=++sequence; pendingEventQuality=quality;
+#if APP_RANGE_JOINT_PEAKS
+    {
+      unsigned i,p;
+      pendingPeaks=detectedPeaks;
+      for(i=0;i<pendingPeaks.count;++i) for(p=0;p<3;++p) {
+        int64_t nominal=(int64_t)p*RANGE_PULSE_STEP*62500;
+        int64_t local=(int64_t)stamp+detectedPeaks.peak[i].offsetNs[p]+nominal;
+        pendingPeaks.peak[i].offsetNs[p]=(int32_t)((int64_t)RangeSync_Master(&syncModel,(uint64_t)local)-
+          (int64_t)pendingEventTime-nominal);
+      }
+    }
+#endif
+    pendingEventId=++sequence;
+#if !APP_RANGE_JOINT_PEAKS
+    pendingEventQuality=quality;
+#endif
     eventStart=now; eventRetry=now-200;
   }
 }
@@ -283,7 +398,26 @@ static void AudioProcess(void)
     if ((!lastDetection || detected>lastDetection+4000) && age>=0 && age<windowAnchorNs)
     {
       lastDetection=detected;
-      if(windowTimeReady) DetectionReady(windowAnchorNs-(uint64_t)(age+0.5),q);
+      if(windowTimeReady) {
+#if APP_RANGE_JOINT_PEAKS
+        RangeDspPeaks candidates; unsigned c,p;
+        RangeDsp_Candidates(window,position,&candidates);
+        memset(&detectedPeaks,0,sizeof(detectedPeaks));
+        detectedPeaks.count=candidates.count; detectedPeaks.overflow=candidates.overflow;
+        appRangeStatus.peakCandidates=candidates.count;
+        for(c=0;c<candidates.count;++c) {
+          detectedPeaks.peak[c].quality=candidates.peak[c].quality;
+          for(p=0;p<3;++p) {
+            double offset=(candidates.peak[c].position[p]-position)*windowSampleNs-
+                          (double)p*RANGE_PULSE_STEP*62500.0;
+            detectedPeaks.peak[c].offsetNs[p]=(int32_t)(offset>=0 ? offset+0.5:offset-0.5);
+          }
+        }
+        if(!candidates.count) { ++appRangeStatus.peakInconsistent; appRangeStatus.peakUncertain=1; }
+        else
+#endif
+        DetectionReady(windowAnchorNs-(uint64_t)(age+0.5),q);
+      }
       else ++appRangeStatus.audioTimingRejected;
     }
   }
@@ -338,6 +472,20 @@ static void PairEvents(void)
       int32_t direction;
       if(delta < -20000000LL || delta > 20000000LL) continue;
       localEvents[i].used=0; remoteEvents[j].used=0;
+#if APP_RANGE_JOINT_PEAKS
+      {
+        int paired=RangePeak_Pair(&localEvents[i].peaks,&remoteEvents[j].peaks,delta,
+                                 &delta,&resultQuality,&appRangeStatus.peakPairSpreadNs);
+        if(paired!=1) {
+          if(paired==2) ++appRangeStatus.peakAmbiguous;
+          else ++appRangeStatus.peakInconsistent;
+          appRangeStatus.peakUncertain=1;
+          break; /* Never reuse the consumed local event. */
+        }
+        appRangeStatus.peakUncertain=0;
+      }
+#endif
+      appRangeStatus.resultDeltaUs=(int32_t)(delta/1000);
       delta-=APP_RANGE_BIAS_NS;
       if(!RangeDsp_Distance(delta,APP_TEMPERATURE_DECI_C,&resultMm,&direction))
       { ++appRangeStatus.rejected; ++appRangeStatus.distanceRejects; continue; }
@@ -345,12 +493,42 @@ static void PairEvents(void)
       if (delta <= (int64_t)appRangeStatus.syncErrorNs && delta >= -(int64_t)appRangeStatus.syncErrorNs)
         direction=0;
       resultSide=direction>0 ? 1 : (direction<0 ? 2 : 0);
+#if !APP_RANGE_JOINT_PEAKS
       resultQuality=localEvents[i].quality<remoteEvents[j].quality ?
                     localEvents[i].quality:remoteEvents[j].quality;
-      appRangeStatus.resultDeltaUs=(int32_t)(
-        ((int64_t)remoteEvents[j].time-(int64_t)localEvents[i].time)/1000);
+#endif
+#if APP_RANGE_STATISTICS
+      /* Keep an accepted estimate visible for its normal hold time while the
+       * next batch collects. A later single shot must not turn it yellow or
+       * replace its pending retransmission payload. Do not extend its expiry. */
+      if(!appRangeStatus.valid || !appRangeStatus.resultIsStat ||
+         now-lastResultMs>=APP_RANGE_RESULT_HOLD_MS) {
+        appRangeStatus.resultIsStat=0;
+        pendingResultId=++sequence; resultStart=HAL_GetTick(); resultRetry=resultStart-200;
+        DisplayResult(pendingResultId,resultMm,resultSide,resultQuality);
+      }
+      if(batch.stage==1) {
+        uint64_t event=localEvents[i].time;
+        uint64_t phase;
+        if(event<=batchLastEventNs || event-batchLastEventNs<350000000ULL) {
+          ++appRangeStatus.batchCadenceRejected; continue;
+        }
+        phase=(event-batchFirstEventNs)%500000000ULL;
+        if(phase>50000000ULL && phase<450000000ULL) {
+          ++appRangeStatus.batchCadenceRejected; continue;
+        }
+      }
+      if(batch.stage!=1) {
+        batchFirstEventNs=localEvents[i].time;
+        appRangeStatus.batchUsed=0; appRangeStatus.batchSpanMm=0;
+      }
+      batchLastEventNs=localEvents[i].time;
+      RangeBatch_Add(&batch,delta<0 ? -(int32_t)resultMm : (int32_t)resultMm,resultQuality,now);
+      appRangeStatus.batchStage=1; appRangeStatus.batchCount=batch.count;
+#else
       pendingResultId=++sequence; resultStart=now; resultRetry=now-200;
       DisplayResult(pendingResultId,resultMm,resultSide,resultQuality);
+#endif
       break;
     }
 }
@@ -403,21 +581,57 @@ void AppRange_Process(void)
     {
       eventRetry=now;
       ++appRangeStatus.eventTxAttempts;
+#if APP_RANGE_JOINT_PEAKS
+      Send(PEAK_EVENT,pendingEventId,syncEpoch,pendingEventTime,
+           ((uint64_t)APP_RANGE_AUDIO_PROFILE<<16)|(pendingPeaks.overflow<<8)|pendingPeaks.count,
+           pendingPeaks.count>0 ? RangePeak_Pack(&pendingPeaks.peak[0]):0,
+           pendingPeaks.count>1 ? RangePeak_Pack(&pendingPeaks.peak[1]):0,
+           pendingPeaks.count>2 ? RangePeak_Pack(&pendingPeaks.peak[2]):0);
+#else
       Send(EVENT,pendingEventId,syncEpoch,pendingEventTime,pendingEventQuality,0,0,0);
+#endif
     }
   }
   else
   {
     if(appRangeStatus.locked && now-lastStateMs>1500) Unlock();
+#if APP_RANGE_STATISTICS
+    if(appRangeStatus.locked && batch.stage==1 && now-batch.startMs>=APP_RANGE_BATCH_MS) {
+      RangeBatch_Finish(&batch);
+      appRangeStatus.batchStage=batch.stage; appRangeStatus.batchUsed=batch.used;
+      appRangeStatus.batchSpanMm=batch.span;
+      if(batch.stage==2) {
+        resultMm=(uint32_t)(batch.estimate<0 ? -batch.estimate : batch.estimate);
+        resultSide=batch.estimate<0 ? 2 : 1; resultQuality=batch.resultQuality;
+        appRangeStatus.resultIsStat=1;
+        pendingResultId=++sequence; resultStart=HAL_GetTick(); resultRetry=resultStart-200;
+        DisplayResult(pendingResultId,resultMm,resultSide,resultQuality);
+      } /* On failure retain the last single-shot preview, explicitly labelled. */
+    }
+#endif
     if(appRangeStatus.locked) PairEvents();
+#if APP_RANGE_JOINT_PEAKS
+    if(appRangeStatus.locked && now-peakStateMs>=500) {
+      peakStateMs=now;
+      Send(PEAK_STATE,++sequence,peerEpoch,appRangeStatus.peakUncertain,
+           appRangeStatus.peakAmbiguous,appRangeStatus.peakInconsistent,
+           appRangeStatus.peakCandidates,appRangeStatus.peakPairSpreadNs);
+    }
+#endif
     /* PairEvents/DisplayResult stamp their new result using fresh ticks. */
     now=HAL_GetTick();
     if(pendingResultId && now-resultStart>1000) pendingResultId=0;
     if(pendingResultId && now-resultRetry>=200)
     {
       resultRetry=now;
-      Send(RESULT,pendingResultId,peerEpoch,resultMm,resultSide,resultQuality,0,0);
+      Send(RESULT,pendingResultId,peerEpoch,txResultMm,txResultSide,txResultQuality,txResultKind,0);
     }
+#if APP_RANGE_STATISTICS
+    if(appRangeStatus.locked && now-batchStateMs>=500) {
+      batchStateMs=now;
+      Send(BATCH_STATE,++sequence,peerEpoch,batch.stage,batch.count,batch.used,batch.span,appRangeStatus.resultId);
+    }
+#endif
   }
   now=HAL_GetTick();
   if(appRangeStatus.valid && now-lastResultMs>=APP_RANGE_RESULT_HOLD_MS) appRangeStatus.valid=0;

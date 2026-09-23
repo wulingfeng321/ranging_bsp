@@ -87,14 +87,20 @@ static void DrawDashboard(uint32_t now)
                   now - resultTick < RESULT_TIMEOUT_MS;
   BSP_LCD_SetBackColor(LCD_COLOR_BLACK);
   BSP_LCD_SetFont(&Font16);
-  Text(12, 4, "BOARD RANGE TEST3", LCD_COLOR_CYAN);
+#if APP_RANGE_JOINT_PEAKS
+  Text(12, 4, "RANGE JOINT2", LCD_COLOR_CYAN);
+#elif APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_WIDE
+  Text(12, 4, "RANGE WIDE1", LCD_COLOR_CYAN);
+#else
+  Text(12, 4, "RANGE LEGACY", LCD_COLOR_CYAN);
+#endif
   BSP_LCD_SetFont(&Font12);
   (void)snprintf(netText, sizeof(netText), "%s NET %s OK:%lu", APP_BOARD_NAME,
                  appNetStatus.initError ? "ERROR" :
                  (appNetStatus.online ? "ONLINE" : "WAIT"),
                  (unsigned long)appNetStatus.testAck);
   Text(250, 4, netText, appNetStatus.online ? LCD_COLOR_GREEN : LCD_COLOR_YELLOW);
-  Text(12, 27, "A(L) - B(L) DISTANCE", LCD_COLOR_WHITE);
+  Text(12, 27, appRangeStatus.resultIsStat ? "RELAXED STAT (UNCAL)" : "SINGLE SHOT (UNCAL)", LCD_COLOR_WHITE);
   if (fresh)
   {
     (void)snprintf(value, sizeof(value), "%lu.%03lu m",
@@ -102,7 +108,7 @@ static void DrawDashboard(uint32_t now)
                    (unsigned long)(distanceMm % 1000U));
     state = appRangeStatus.direction > 0 ? "SOURCE: A SIDE" :
             (appRangeStatus.direction < 0 ? "SOURCE: B SIDE" : "SOURCE: UNKNOWN");
-    color = LCD_COLOR_GREEN;
+    color = appRangeStatus.resultIsStat ? LCD_COLOR_GREEN : LCD_COLOR_YELLOW;
   }
   else
   {
@@ -110,8 +116,13 @@ static void DrawDashboard(uint32_t now)
     if (rangeState == MIC_SCOPE_RANGE_VALID) state = "RESULT EXPIRED";
     else if (rangeState == MIC_SCOPE_RANGE_MEASURING) state = "MEASURING...";
     else if (rangeState == MIC_SCOPE_RANGE_INVALID) state = "INVALID RESULT";
+    if(appRangeStatus.batchStage==1) state="COLLECTING 11s";
+    else if(appRangeStatus.batchStage==3) state="TOO FEW SAMPLES";
+    else if(appRangeStatus.batchStage==4) state="UNSTABLE SAMPLES";
+    else if(appRangeStatus.batchStage==5) state="OUTSIDE 100-200mm";
   }
   BSP_LCD_SetFont(&Font24);
+  if(appRangeStatus.peakUncertain) state=fresh ? "LAST / PEAK UNCERTAIN":"PEAK UNCERTAIN";
   Text(12, 44, value, color);
   BSP_LCD_SetFont(fresh ? &Font16 : &Font12);
   Text(250, 29, state, color);
@@ -121,7 +132,22 @@ static void DrawDashboard(uint32_t now)
     Text(250,47,appRangeStatus.direction>0 ? "SOUND >>> A --- B" :
       (appRangeStatus.direction<0 ? "A --- B <<< SOUND" : "ARRIVAL SIDE UNCERTAIN"),
       LCD_COLOR_CYAN);
-    if(APP_BOARD_ROLE==APP_BOARD_A)
+    if(APP_RANGE_STATISTICS)
+    {
+      (void)snprintf(netText,sizeof(netText),"N:%lu/%lu SPAN:%lumm",
+        (unsigned long)appRangeStatus.batchUsed,(unsigned long)appRangeStatus.batchCount,
+        (unsigned long)appRangeStatus.batchSpanMm);
+      if(appRangeStatus.batchStage!=2 || !appRangeStatus.resultIsStat) {
+        const char *reason=appRangeStatus.batchStage==3 ? "TOO FEW" :
+          (appRangeStatus.batchStage==4 ? "UNSTABLE" :
+          (appRangeStatus.batchStage==5 ? "OUT OF RANGE" : "COLLECTING"));
+        (void)snprintf(netText,sizeof(netText),"%s %lu/%lu S:%lu",reason,
+          (unsigned long)appRangeStatus.batchUsed,(unsigned long)appRangeStatus.batchCount,
+          (unsigned long)appRangeStatus.batchSpanMm);
+      }
+      Text(250,63,netText,LCD_COLOR_YELLOW);
+    }
+    else if(APP_BOARD_ROLE==APP_BOARD_A)
     {
       (void)snprintf(netText,sizeof(netText),"RAW B-A:%+ldus",
                      (long)appRangeStatus.resultDeltaUs);
@@ -132,7 +158,9 @@ static void DrawDashboard(uint32_t now)
   else
   {
     Text(250,47,audioStatus,started ? LCD_COLOR_CYAN : LCD_COLOR_RED);
-    Text(250,63,"SETUP: SOUND--A--B",LCD_COLOR_YELLOW);
+    (void)snprintf(netText,sizeof(netText),"PAIRED:%lu / 15",
+      (unsigned long)appRangeStatus.batchCount);
+    Text(250,63,netText,LCD_COLOR_YELLOW);
   }
   (void)snprintf(netText, sizeof(netText), "SYNC %s AT:%s Q:%lu",
                  (appRangeStatus.error==-1 || appRangeStatus.error==-2) ? "ERROR" :
@@ -161,7 +189,7 @@ static void DrawRangeDiagnostics(void)
     (unsigned long)appRangeStatus.eventQuality);
   Text(120,96,text,LCD_COLOR_YELLOW);
   /* Alternate with the existing counters, keeping the waveform area free. */
-  if((HAL_GetTick()/2000U)&1U) {
+  if((HAL_GetTick()/2000U)%3U==1U) {
     BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
     BSP_LCD_FillRect(120,96,360,12);
     (void)snprintf(text,sizeof(text),"AJ:%luus PS:%lu EQ:%lu",
@@ -170,6 +198,18 @@ static void DrawRangeDiagnostics(void)
       (unsigned long)appRangeStatus.eventQuality);
     Text(120,96,text,LCD_COLOR_YELLOW);
   }
+#if APP_RANGE_JOINT_PEAKS
+  if((HAL_GetTick()/2000U)%3U==2U) {
+    BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
+    BSP_LCD_FillRect(120,96,360,12);
+    (void)snprintf(text,sizeof(text),"PK:%lu AM:%lu IC:%lu DS:%luus",
+      (unsigned long)appRangeStatus.peakCandidates,
+      (unsigned long)(appRangeStatus.peakAmbiguous%10000U),
+      (unsigned long)(appRangeStatus.peakInconsistent%10000U),
+      (unsigned long)(appRangeStatus.peakPairSpreadNs/1000U));
+    Text(120,96,text,LCD_COLOR_YELLOW);
+  }
+#endif
   if(APP_BOARD_ROLE==APP_BOARD_A)
   {
     if(appRangeStatus.pairDeltaValid)
