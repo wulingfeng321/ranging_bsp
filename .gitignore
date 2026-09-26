@@ -22,3 +22,7 @@
 *.bak
 *.tmp
 *.~*
+
+# Python host-test cache
+__pycache__/
+*.pyc

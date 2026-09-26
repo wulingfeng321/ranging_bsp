@@ -7,6 +7,7 @@ import sys
 import wave
 from pathlib import Path
 lib=c.CDLL(sys.argv[1])
+assert lib.Test_SampleRate()==16000, "This regression suite requires a 16 kHz host library; use test_48k.py for 48 kHz"
 class DspPeak(c.Structure):
     _fields_=[('position',c.c_float*3),('quality',c.c_uint32)]
 class DspPeaks(c.Structure):

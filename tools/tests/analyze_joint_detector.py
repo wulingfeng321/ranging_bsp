@@ -59,6 +59,7 @@ def main():
     parser.add_argument('library')
     args = parser.parse_args()
     lib = c.CDLL(args.library)
+    assert lib.Test_SampleRate() == 16000, "This characterization uses the 16 kHz baseline"
     lib.RangeDsp_Find.argtypes = [c.POINTER(c.c_int16), c.c_uint, c.c_uint,
                                  c.POINTER(c.c_float), c.POINTER(c.c_uint32)]
     lib.RangeDsp_Candidates.argtypes = [c.POINTER(c.c_int16), c.c_float, c.POINTER(DspPeaks)]

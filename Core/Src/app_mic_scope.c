@@ -8,11 +8,11 @@
 #include <stdio.h>
 #include "mic_scope_trigger.h"
 
-/* Nominal 16 kHz stereo PCM, 160 ms visible, 16 ms per DMA half. */
-#define SAMPLE_RATE       16000U
+/* Full-rate stereo PCM; 16 kHz display preview, 160 ms visible, 16 ms DMA half. */
+#define SAMPLE_RATE       APP_AUDIO_SAMPLE_RATE
 #define WINDOW_FRAMES    2560U
 #define RING_FRAMES      WINDOW_FRAMES
-#define HALF_FRAMES      256U
+#define HALF_FRAMES      APP_AUDIO_HALF_FRAMES
 #define DMA_WORDS        (HALF_FRAMES * 2U * 2U)
 #define PLOT_WIDTH       480U
 #define REFRESH_MS       150U
@@ -21,7 +21,7 @@
 #define FRAME_A          0xC0000000U
 #define FRAME_B          0xC0080000U
 /* Reserved SDRAM, covered by main.c's non-cacheable 8 MB MPU region.
- * Two LCD buffers end before C0100000; DMA buffer occupies 2048 bytes. */
+ * Two LCD buffers end before C0100000; DMA buffer occupies 6144 bytes at 48 kHz. */
 #define AUDIO_BUFFER     ((uint16_t *)0xC0100000U)
 
 extern SAI_HandleTypeDef haudio_in_sai;
@@ -88,9 +88,9 @@ static void DrawDashboard(uint32_t now)
   BSP_LCD_SetBackColor(LCD_COLOR_BLACK);
   BSP_LCD_SetFont(&Font16);
 #if APP_RANGE_JOINT_PEAKS
-  Text(12, 4, "RANGE JOINT2", LCD_COLOR_CYAN);
+  Text(12, 4, APP_AUDIO_SAMPLE_RATE==48000U ? "JOINT2 48k":"JOINT2 16k", LCD_COLOR_CYAN);
 #elif APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_WIDE
-  Text(12, 4, "RANGE WIDE1", LCD_COLOR_CYAN);
+  Text(12, 4, APP_AUDIO_SAMPLE_RATE==48000U ? "WIDE1 48k":"WIDE1 16k", LCD_COLOR_CYAN);
 #else
   Text(12, 4, "RANGE LEGACY", LCD_COLOR_CYAN);
 #endif
@@ -189,7 +189,7 @@ static void DrawRangeDiagnostics(void)
     (unsigned long)appRangeStatus.eventQuality);
   Text(120,96,text,LCD_COLOR_YELLOW);
   /* Alternate with the existing counters, keeping the waveform area free. */
-  if((HAL_GetTick()/2000U)%3U==1U) {
+  if((HAL_GetTick()/2000U)%4U==1U) {
     BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
     BSP_LCD_FillRect(120,96,360,12);
     (void)snprintf(text,sizeof(text),"AJ:%luus PS:%lu EQ:%lu",
@@ -199,7 +199,7 @@ static void DrawRangeDiagnostics(void)
     Text(120,96,text,LCD_COLOR_YELLOW);
   }
 #if APP_RANGE_JOINT_PEAKS
-  if((HAL_GetTick()/2000U)%3U==2U) {
+  if((HAL_GetTick()/2000U)%4U==2U) {
     BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
     BSP_LCD_FillRect(120,96,360,12);
     (void)snprintf(text,sizeof(text),"PK:%lu AM:%lu IC:%lu DS:%luus",
@@ -210,6 +210,15 @@ static void DrawRangeDiagnostics(void)
     Text(120,96,text,LCD_COLOR_YELLOW);
   }
 #endif
+  if((HAL_GetTick()/2000U)%4U==3U) {
+    BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
+    BSP_LCD_FillRect(120,96,360,12);
+    (void)snprintf(text,sizeof(text),"DSP:%lu%% MAX:%luus BK:%lums",
+      (unsigned long)(appRangeStatus.dspLoadPermille/10),
+      (unsigned long)appRangeStatus.dspMaxUs,
+      (unsigned long)((uint64_t)appRangeStatus.backlogSamples*1000/APP_AUDIO_SAMPLE_RATE));
+    Text(120,96,text,LCD_COLOR_YELLOW);
+  }
   if(APP_BOARD_ROLE==APP_BOARD_A)
   {
     if(appRangeStatus.pairDeltaValid)
@@ -236,7 +245,7 @@ static void StoreHalf(uint32_t wordOffset)
   uint32_t pos = writeFrame;
   const volatile int16_t *src = (const volatile int16_t *)AUDIO_BUFFER;
   AppRange_Audio(src + wordOffset, HALF_FRAMES);
-  for (i = 0; i < HALF_FRAMES; ++i)
+  for (i = 0; i < HALF_FRAMES; i+=APP_AUDIO_SCALE)
   {
     history[pos][0] = src[wordOffset + 2U * i];
     history[pos][1] = src[wordOffset + 2U * i + 1U];
@@ -245,7 +254,7 @@ static void StoreHalf(uint32_t wordOffset)
   }
   writeFrame = pos;
   if (validFrames < RING_FRAMES)
-    validFrames += HALF_FRAMES;
+    validFrames += HALF_FRAMES/APP_AUDIO_SCALE;
   ++micDmaBlocks;
 }
 

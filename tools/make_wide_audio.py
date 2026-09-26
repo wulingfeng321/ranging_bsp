@@ -1,4 +1,5 @@
 """Generate WIDE profile audio and exact DC-removed C templates (stdlib only)."""
+import argparse
 import hashlib
 import math
 from pathlib import Path
@@ -6,29 +7,33 @@ import struct
 import wave
 
 ROOT = Path(__file__).resolve().parents[1]
-FS = 16000
-PULSE = 512
-STEP = 576
+parser=argparse.ArgumentParser()
+parser.add_argument('--sample-rate',type=int,choices=(16000,48000),default=48000)
+FS=parser.parse_args().sample_rate
+SCALE=FS//16000
+PULSE=512*SCALE
+STEP=576*SCALE
+SUFFIX='_48k' if FS==48000 else ''
 
 def chirp(f0, f1):
     result = []
     for i in range(PULSE):
         t = i / FS
         edge = min(i, PULSE - 1 - i)
-        envelope = 0.5 - 0.5 * math.cos(math.pi * edge / 64) if edge < 64 else 1.0
+        envelope = 0.5 - 0.5 * math.cos(math.pi * edge / (64*SCALE)) if edge < 64*SCALE else 1.0
         phase = 2 * math.pi * (f0 * t + (f1 - f0) * t * t / (2 * PULSE / FS))
         result.append(round(0.75 * 32767 * envelope * math.cos(phase)))
     return result
 
 def main():
     up, down = chirp(1500, 6500), chirp(6500, 1500)
-    signature = up + [0] * 64 + down + [0] * 64 + up
-    pcm = [0] * (FS * 21 // 2)
+    signature = up + [0] * (64*SCALE) + down + [0] * (64*SCALE) + up
+    pcm = [0] * (FS * 31 // 2)
     for group in range(3):
         for repeat in range(5):
             at = group * 4 * FS + repeat * FS // 2
             pcm[at:at + len(signature)] = signature
-    path = ROOT / 'tools/test_audio_wide_repeat.wav'
+    path = ROOT / f'tools/test_audio_wide{SUFFIX}_repeat.wav'
     with wave.open(str(path), 'wb') as wav:
         wav.setparams((1, 2, FS, 0, 'NONE', 'not compressed'))
         wav.writeframes(struct.pack('<' + 'h' * len(pcm), *pcm))
@@ -39,11 +44,12 @@ def main():
         mean = sum(pulse) / len(pulse)
         values = [round(v - mean) for v in pulse]
         lines += [f'#define RANGE_{name.upper()}_ENERGY {float(sum(v*v for v in values)):.1f}f',
-                  f'static const int16_t range{name}[512] = {{']
-        lines += ['  ' + ', '.join(map(str, values[i:i+16])) + ',' for i in range(0, 512, 16)]
+                  f'#define RANGE_{name.upper()}_COARSE_ENERGY {float(sum(v*v for v in values[::SCALE])):.1f}f',
+                  f'static const int16_t range{name}[{PULSE}] = {{']
+        lines += ['  ' + ', '.join(map(str, values[i:i+16])) + ',' for i in range(0, PULSE, 16)]
         lines += ['};']
     lines += ['#endif']
-    (ROOT / 'Core/Inc/range_template_wide.h').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    (ROOT / f'Core/Inc/range_template_wide{SUFFIX}.h').write_text('\n'.join(lines) + '\n', encoding='utf-8')
     print(path)
 
 if __name__ == '__main__':

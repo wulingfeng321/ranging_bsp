@@ -10,9 +10,17 @@
 #include <stdio.h>
 #include "../../Core/Src/app_range.c"
 #if APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_LEGACY
+#if APP_AUDIO_SAMPLE_RATE == 48000U
+#include "range_template_48k.h"
+#else
 #include "range_template.h"
+#endif
+#else
+#if APP_AUDIO_SAMPLE_RATE == 48000U
+#include "range_template_wide_48k.h"
 #else
 #include "range_template_wide.h"
+#endif
 #endif
 struct netif gnetif={1};
 AppNetStatus appNetStatus;
@@ -32,6 +40,8 @@ uint32_t HAL_GetTick(void)
 }
 uint64_t RangeClock_Now(void) { return clockNs; }
 int RangeClock_Init(void) { return 1; }
+int RangePps_Init(void) { return 1; }
+void RangePps_Update(const RangeSync *s,int locked) { (void)s; (void)locked; }
 uint64_t AppNet_LocalSession(void) { return 111; }
 uint64_t AppNet_PeerSession(void) { return 222; }
 void MicScope_SetRangeState(MicScope_RangeState s) { (void)s; }
@@ -60,7 +70,7 @@ static void Inject(uint8_t type,uint32_t id,uint32_t epoch,uint64_t x,uint64_t y
 {
   struct pbuf *p=pbuf_alloc(0,72,0);
   memset(p->bytes,0,72);memcpy(p->bytes,"RAN2",4);
-  p->bytes[4]=2;p->bytes[5]=type;p->bytes[6]=APP_PEER_ROLE;p->bytes[7]=72;
+  p->bytes[4]=RANGE_WIRE_VERSION;p->bytes[5]=type;p->bytes[6]=APP_PEER_ROLE;p->bytes[7]=72;
   P64(p->bytes+8,222);P64(p->bytes+16,111);P32(p->bytes+24,id);P32(p->bytes+28,epoch);
   P64(p->bytes+32,x);P64(p->bytes+40,y);P64(p->bytes+48,z);
   P64(p->bytes+56,testPayloadU);P64(p->bytes+64,testPayloadV);

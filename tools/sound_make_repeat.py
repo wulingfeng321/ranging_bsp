@@ -27,6 +27,7 @@ import numpy as np
 import soundfile as sf
 
 
+# The default output is the 48 kHz file; --sample-rate 16000 regenerates the baseline.
 DEFAULT_REPEAT = 3
 DEFAULT_GAP_SECONDS = 1.5
 DEFAULT_TAIL_SECONDS = 5.0
@@ -49,17 +50,19 @@ def nonnegative_seconds(value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--sample-rate", type=int, choices=(16000,48000), default=48000)
     parser.add_argument("--repeat", type=positive_count, default=DEFAULT_REPEAT)
     parser.add_argument("--gap-seconds", type=nonnegative_seconds,
                         default=DEFAULT_GAP_SECONDS)
     parser.add_argument("--tail-seconds", type=nonnegative_seconds,
                         default=DEFAULT_TAIL_SECONDS)
     parser.add_argument("--output", type=Path,
-                        default=TOOLS_DIR / "test_audio_chirp_repeat.wav")
+                        default=None)
     args = parser.parse_args()
 
-    output = args.output.resolve()
+    output = (args.output or TOOLS_DIR / ("test_audio_chirp_48k_repeat.wav" if args.sample_rate == 48000 else "test_audio_chirp_repeat.wav")).resolve()
     if output in {(TOOLS_DIR / "test_audio_chirp.wav").resolve(),
+                  (TOOLS_DIR / "test_audio_chirp_48k.wav").resolve(),
                   (TOOLS_DIR / "sound_make.py").resolve(),
                   Path(__file__).resolve()}:
         parser.error("output must not overwrite the original audio or scripts")
@@ -68,7 +71,7 @@ def main():
 
     # 原生成器在模块顶层写文件；使用独立进程和临时工作目录隔离该行为。
     with tempfile.TemporaryDirectory(prefix="ranging_audio_") as temp_dir:
-        subprocess.run([sys.executable, str(TOOLS_DIR / "sound_make.py")],
+        subprocess.run([sys.executable, str(TOOLS_DIR / "sound_make.py"), "--sample-rate", str(args.sample_rate), "--output", "test_audio_chirp.wav"],
                        cwd=temp_dir, check=True, stdout=subprocess.PIPE)
         source = Path(temp_dir) / "test_audio_chirp.wav"
         info = sf.info(source)

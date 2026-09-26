@@ -23,6 +23,16 @@
 #endif
 
 #define APP_UDP_PORT 5000U
+/* Both boards use the same rate. 16 kHz is retained for regression. */
+#ifndef APP_AUDIO_SAMPLE_RATE
+#define APP_AUDIO_SAMPLE_RATE 48000U
+#endif
+#if APP_AUDIO_SAMPLE_RATE != 16000U && APP_AUDIO_SAMPLE_RATE != 48000U
+#error Supported audio rates are 16000 and 48000
+#endif
+#define APP_AUDIO_SCALE (APP_AUDIO_SAMPLE_RATE / 16000U)
+#define APP_AUDIO_HALF_FRAMES (256U * APP_AUDIO_SCALE) /* 16 ms */
+#define APP_AUDIO_SAMPLE_NS (1000000000.0 / APP_AUDIO_SAMPLE_RATE)
 /* Experimental ranging configuration: same on BOTH boards. */
 #define APP_RANGE_PORT 5001U
 #define APP_TEMPERATURE_DECI_C 200 /* 20.0 degrees Celsius; manually set ambient */
@@ -40,8 +50,8 @@
 #define APP_RANGE_AUDIO_LEGACY 1 /* test_audio_chirp[_repeat].wav */
 #define APP_RANGE_AUDIO_WIDE 2   /* test_audio_wide_repeat.wav */
 #ifndef APP_RANGE_AUDIO_PROFILE
-//#define APP_RANGE_AUDIO_PROFILE APP_RANGE_AUDIO_WIDE//ÐÂ·½°¸
-#define APP_RANGE_AUDIO_PROFILE APP_RANGE_AUDIO_LEGACY//¾É·½°¸
+//#define APP_RANGE_AUDIO_PROFILE APP_RANGE_AUDIO_WIDE//æ–°æ–¹æ¡ˆ
+#define APP_RANGE_AUDIO_PROFILE APP_RANGE_AUDIO_LEGACY//æ—§æ–¹æ¡ˆ
 #endif
 #if APP_RANGE_AUDIO_PROFILE != APP_RANGE_AUDIO_LEGACY && APP_RANGE_AUDIO_PROFILE != APP_RANGE_AUDIO_WIDE
 #error Invalid APP_RANGE_AUDIO_PROFILE

@@ -16,6 +16,7 @@ typedef struct {
   uint8_t pairDeltaValid;
   int32_t resultDeltaUs; /* A only: raw B-A delta for the displayed result. */
   uint32_t audioJitterNs, samplePeriodPs, audioTimingRejected;
+  uint32_t dspMaxUs, dspLoadPermille; /* Main-loop DSP wall time, includes IRQ preemption. */
   uint8_t audioTimeReady;
   uint32_t eventPeakSpreadSamples;
   uint32_t batchStage, batchCount, batchUsed, batchSpanMm;
@@ -29,7 +30,7 @@ void AppRange_Init(void);
 void AppRange_Process(void);
 /* Main-loop display admission: give the detector time to drain its backlog. */
 int AppRange_DisplayReady(void);
-/* ISR only: interleaved stereo input, frame count 256, selected channel L.
+/* ISR only: interleaved stereo input, frame count APP_AUDIO_HALF_FRAMES, selected channel L.
  * Data is copied before returning. AudioError invalidates pending events. */
 void AppRange_Audio(const volatile int16_t *pcm, uint32_t frames);
 void AppRange_AudioError(void);

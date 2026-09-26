@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+#include "app_board_config.h"
 
 /* Main-loop only. Fit sample number against 32 distinct DMA observations.
  * A second fit excludes timing outliers; never fit across an audio gap. */
@@ -67,7 +68,7 @@ static void RangeAudioTime_Add(RangeAudioTime *s, uint64_t sample, uint64_t time
     double error=fabs(y[i]-a-b*x[i]);
     if(error>s->jitterNs) s->jitterNs=(uint32_t)error;
   }
-  if(b<60000.0 || b>65000.0 || s->jitterNs>100000U) return;
+  if(b<APP_AUDIO_SAMPLE_NS*0.96 || b>APP_AUDIO_SAMPLE_NS*1.04 || s->jitterNs>100000U) return;
   s->periodNs=b; s->anchorNs=(double)time+a; s->ready=1;
 }
 #endif

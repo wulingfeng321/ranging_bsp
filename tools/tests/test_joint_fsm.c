@@ -77,18 +77,18 @@ int main(void)
   }
   /* Continuous old audio at the enlarged window, no network pairing mocks. */
   {
-    int16_t pcm[512]; uint32_t before=appRangeStatus.events;
+    int16_t pcm[APP_AUDIO_HALF_FRAMES*2]; uint32_t before=appRangeStatus.events;
     ClearMeasurements(); appRangeStatus.locked=1;
-    for(i=0;i<24576;i+=256) {
-      for(k=0;k<256;++k) {
-        int at=(int)((i+k)%8000)-129; int16_t v=0;
-        if(at>=0 && at<512) v=rangeUp[at];
-        else if(at>=640 && at<1152) v=rangeDown[at-640];
-        else if(at>=1280 && at<1792) v=rangeUp[at-1280];
+    for(i=0;i<24576*APP_AUDIO_SCALE;i+=APP_AUDIO_HALF_FRAMES) {
+      for(k=0;k<APP_AUDIO_HALF_FRAMES;++k) {
+        int at=(int)((i+k)%(APP_AUDIO_SAMPLE_RATE/2))-129*APP_AUDIO_SCALE; int16_t v=0;
+        if(at>=0 && at<RANGE_PULSE_SAMPLES) v=rangeUp[at];
+        else if(at>=RANGE_PULSE_STEP && at<RANGE_PULSE_STEP+RANGE_PULSE_SAMPLES) v=rangeDown[at-RANGE_PULSE_STEP];
+        else if(at>=2*RANGE_PULSE_STEP && at<RANGE_SIGNATURE_SAMPLES) v=rangeUp[at-2*RANGE_PULSE_STEP];
         pcm[2*k]=v; pcm[2*k+1]=0;
       }
-      clockNs=20000000000ULL+(uint64_t)(i+256)*62500;
-      AppRange_Audio(pcm,256); for(k=0;k<4;++k) AudioProcess();
+      clockNs=20000000000ULL+(uint64_t)(i+APP_AUDIO_HALF_FRAMES)*1000000000ULL/APP_AUDIO_SAMPLE_RATE;
+      AppRange_Audio(pcm,APP_AUDIO_HALF_FRAMES); for(k=0;k<4;++k) AudioProcess();
     }
     assert(appRangeStatus.events-before==3 && appRangeStatus.audioDrops==0 && appRangeStatus.peakCandidates>0);
     AppRange_AudioError(); AudioProcess();

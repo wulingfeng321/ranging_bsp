@@ -1,5 +1,22 @@
 # ranging_bsp · 双开发板声学测距
 
+## 48 kHz 分支（2026-09-26）
+
+当前分支 `feat/audio-48khz` 从 16 kHz 基线提交 `464cb35` 创建，默认采样率为 48 kHz，
+仍选择 LEGACY / JOINT2、2–6 kHz 测试音频。两板应使用带 `_48000Hz` 后缀的固件，
+播放 [48 kHz 测试音频](tools/test_audio_chirp_48k_repeat.wav)（10.5 s 内容 + 5 s 静默）。
+
+采用粗搜索和完整 48 kHz 精匹配的实时处理方式。测试 WAV 的相关乘加总量约为 16 kHz 的
+1.232 倍；屏幕新增 `DSP / MAX / BK` 供上板检查负载。两板编译和主机回归已通过，硬件验证待做。
+构建、测试、内存与负载说明见 [48 kHz 修改记录](commit_logs/2026-09-26-audio-48khz.md)。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_range_profiles.ps1 -Profiles legacy -JointPeaks
+python tools/sound_make_repeat.py
+```
+
+以下早期版本说明保留用于追溯；旧文件名对应 16 kHz 基线，本分支的使用方法以上述记录为准。
+
 ## D9 同步检验脉冲（2026-09-24）
 
 当前代码使用两板 Arduino D9（PA15 / TIM2_CH1）输出锁定后的 1 Hz、
@@ -7,10 +24,10 @@
 示波器同步精度为 ±1.5 us（原始波形待归档）。接线、烧录和连续上升沿测量见
 [D9 同步脉冲验证说明](commit_logs/2026-09-24-sync-pps.md)。
 
-## 当前版本：旧音频 JOINT2 联合选峰（2026-09-21）
+## 16 kHz 基线：旧音频 JOINT2 联合选峰（2026-09-21）
 
 当前选择 `APP_RANGE_AUDIO_LEGACY`，使用旧 `tools/test_audio_chirp_repeat.wav`。
-运行 `python tools/sound_make_repeat.py` 可重新生成：前 10.5 秒为原有 15 个签名，末尾追加 5 秒静默，总长 15.5 秒，便于停止播放并等待统计结束。
+运行 `python tools/sound_make_repeat.py --sample-rate 16000` 可重新生成：前 10.5 秒为原有 15 个签名，末尾追加 5 秒静默，总长 15.5 秒，便于停止播放并等待统计结束。
 新增 `APP_RANGE_JOINT_PEAKS` 默认在旧音频下开启：两板各发送最多三个候选峰，A 板检查三段
 时间差一致性并拒绝接近评分的多解，不再将每块板独立选择的峰直接相减。
 JOINT2 允许三段各自在联合峰附近 ±1 样点内寻找局部峰，并合并重复候选，修复 JOINT1

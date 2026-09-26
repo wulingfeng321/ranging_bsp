@@ -32,7 +32,8 @@ static uint64_t batchFirstEventNs, batchLastEventNs;
 #define BATCH_STATE 8U
 #define PEAK_EVENT 9U
 #define PEAK_STATE 10U
-#define AUDIO_RING 8192U
+#define AUDIO_RING (APP_AUDIO_SAMPLE_RATE == 48000U ? 32768U : 8192U)
+#define RANGE_WIRE_VERSION (APP_AUDIO_SAMPLE_RATE == 48000U ? 3U : 2U)
 extern struct netif gnetif;
 AppRangeStatus appRangeStatus;
 static struct udp_pcb *pcb;
@@ -47,7 +48,7 @@ static volatile uint64_t audioCount, audioAnchor;
 static volatile uint32_t audioEpoch, audioBlocks;
 static uint64_t readSample, lastDetection;
 static uint32_t seenEpoch, scan;
-static double sampleNs = 62500.0;
+static double sampleNs = APP_AUDIO_SAMPLE_NS;
 static int16_t window[RANGE_WINDOW_SAMPLES];
 static uint64_t windowBase, windowAnchorCount, windowAnchorNs;
 static double windowSampleNs;
@@ -55,6 +56,7 @@ static uint8_t windowTimeReady;
 static RangeAudioTime audioTime;
 static uint32_t timeModelBlock;
 static uint8_t haveWindow;
+static uint64_t dspPeriodStart, dspBusyNs;
 
 typedef struct {
   uint64_t time;
@@ -91,7 +93,7 @@ static uint64_t G64(const uint8_t *p) { return ((uint64_t)G32(p)<<32)|G32(p+4); 
 static uint64_t Send(uint8_t type, uint32_t id, uint32_t epoch,
                      uint64_t x, uint64_t y, uint64_t z, uint64_t u, uint64_t v)
 {
-  uint8_t bytes[WIRE_SIZE] = {'R','A','N','2',2,0,APP_BOARD_ROLE,WIRE_SIZE};
+  uint8_t bytes[WIRE_SIZE] = {'R','A','N','2',RANGE_WIRE_VERSION,0,APP_BOARD_ROLE,WIRE_SIZE};
   struct pbuf *p;
   struct eth_addr *mac;
   const ip4_addr_t *ip;
@@ -165,7 +167,7 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
       p->tot_len!=WIRE_SIZE || pbuf_copy_partial(p,bytes,WIRE_SIZE,0)!=WIRE_SIZE)
   { pbuf_free(p); ++appRangeStatus.rejected; return; }
   pbuf_free(p);
-  if (memcmp(bytes,"RAN2",4) || bytes[4]!=2 || bytes[6]!=APP_PEER_ROLE || bytes[7]!=WIRE_SIZE ||
+  if (memcmp(bytes,"RAN2",4) || bytes[4]!=RANGE_WIRE_VERSION || bytes[6]!=APP_PEER_ROLE || bytes[7]!=WIRE_SIZE ||
       G64(bytes+8)!=AppNet_PeerSession() || G64(bytes+16)!=AppNet_LocalSession()) goto reject;
   type=bytes[5]; id=G32(bytes+24); epoch=G32(bytes+28);
   x=G64(bytes+32); y=G64(bytes+40); z=G64(bytes+48);
@@ -298,6 +300,7 @@ void AppRange_Audio(const volatile int16_t *pcm, uint32_t frames)
   uint32_t i;
   uint64_t now=RangeClock_Now(), previous=audioAnchor;
   uint64_t base=audioCount;
+  if(frames!=APP_AUDIO_HALF_FRAMES) { ++audioEpoch; return; }
   if (previous && (now-previous<12000000ULL || now-previous>20000000ULL))
     ++audioEpoch;
   for(i=0;i<frames;++i)
@@ -332,7 +335,7 @@ static void DetectionReady(uint64_t stamp, uint32_t quality)
       unsigned i,p;
       pendingPeaks=detectedPeaks;
       for(i=0;i<pendingPeaks.count;++i) for(p=0;p<3;++p) {
-        int64_t nominal=(int64_t)p*RANGE_PULSE_STEP*62500;
+        int64_t nominal=(int64_t)p*RANGE_PULSE_STEP*1000000000LL/APP_AUDIO_SAMPLE_RATE;
         int64_t local=(int64_t)stamp+detectedPeaks.peak[i].offsetNs[p]+nominal;
         pendingPeaks.peak[i].offsetNs[p]=(int32_t)((int64_t)RangeSync_Master(&syncModel,(uint64_t)local)-
           (int64_t)pendingEventTime-nominal);
@@ -392,12 +395,12 @@ static void AudioProcess(void)
       window[i]=audioRing[(uint32_t)(readSample+i)&(AUDIO_RING-1)];
     scan=0; haveWindow=1;
   }
-  if ((!lastDetection || windowBase+scan>lastDetection+4000) &&
-      RangeDsp_Find(window,scan,scan+64,&position,&q))
+  if ((!lastDetection || windowBase+scan>lastDetection+RANGE_REFRACTORY_SAMPLES) &&
+      RangeDsp_Find(window,scan,scan+RANGE_SCAN_SLICE,&position,&q))
   {
     uint64_t detected=windowBase+(uint64_t)position;
     double age=((double)(windowAnchorCount-windowBase)-position)*windowSampleNs;
-    if ((!lastDetection || detected>lastDetection+4000) && age>=0 && age<windowAnchorNs)
+    if ((!lastDetection || detected>lastDetection+RANGE_REFRACTORY_SAMPLES) && age>=0 && age<windowAnchorNs)
     {
       lastDetection=detected;
       if(windowTimeReady) {
@@ -411,7 +414,7 @@ static void AudioProcess(void)
           detectedPeaks.peak[c].quality=candidates.peak[c].quality;
           for(p=0;p<3;++p) {
             double offset=(candidates.peak[c].position[p]-position)*windowSampleNs-
-                          (double)p*RANGE_PULSE_STEP*62500.0;
+                          (double)p*RANGE_PULSE_STEP*APP_AUDIO_SAMPLE_NS;
             detectedPeaks.peak[c].offsetNs[p]=(int32_t)(offset>=0 ? offset+0.5:offset-0.5);
           }
         }
@@ -423,10 +426,9 @@ static void AudioProcess(void)
       else ++appRangeStatus.audioTimingRejected;
     }
   }
-  scan+=64;
-  /* We searched starts [0,256). Advancing only 128 searched half of those
-   * starts twice and required eight slices per incoming 256-sample block. */
-  if(scan>=256) { haveWindow=0; readSample+=256; }
+  scan+=RANGE_SCAN_SLICE;
+  /* Four bounded scan slices per 16 ms DMA half. */
+  if(scan>=RANGE_SCAN_ADVANCE) { haveWindow=0; readSample+=RANGE_SCAN_ADVANCE; }
 }
 
 int AppRange_DisplayReady(void)
@@ -439,7 +441,7 @@ int AppRange_DisplayReady(void)
   __set_PRIMASK(mask);
   /* One full signature window is normal latency, not an overrun. Defer
    * expensive LCD work when more than one additional DMA block is queued. */
-  return count-readSample<=RANGE_WINDOW_SAMPLES+256U;
+  return count-readSample<=RANGE_WINDOW_SAMPLES+APP_AUDIO_HALF_FRAMES;
 }
 
 static void PairEvents(void)
@@ -552,7 +554,17 @@ void AppRange_Process(void)
 {
   uint32_t now=HAL_GetTick();
   if(!clockReady || !pcb) return;
-  AudioProcess(); /* Continues during waveform hold and while offline. */
+  {
+    uint64_t start=RangeClock_Now(), finish, elapsed;
+    AudioProcess(); /* Full-rate PCM; never run DSP in the DMA ISR. */
+    finish=RangeClock_Now(); elapsed=finish-start; dspBusyNs+=elapsed;
+    if(elapsed/1000>appRangeStatus.dspMaxUs) appRangeStatus.dspMaxUs=(uint32_t)(elapsed/1000);
+    if(!dspPeriodStart) dspPeriodStart=start;
+    if(finish-dspPeriodStart>=1000000000ULL) {
+      appRangeStatus.dspLoadPermille=(uint32_t)(dspBusyNs*1000/(finish-dspPeriodStart));
+      dspBusyNs=0; dspPeriodStart=finish;
+    }
+  }
   /* DetectionReady may have created an event after the entry tick. Using
    * that older tick makes unsigned event age wrap and expire immediately. */
   now=HAL_GetTick();
