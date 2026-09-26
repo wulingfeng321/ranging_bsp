@@ -51,7 +51,7 @@
 #define NO_SYS 1
 /*----- Value in opt.h for SYS_LIGHTWEIGHT_PROT: 1 -----*/
 #define SYS_LIGHTWEIGHT_PROT 0
-/*----- Value in opt.h for MEM_ALIGNMENT: 1 -----*/
+/*----- Default Value for MEM_ALIGNMENT: 4 ---*/
 #define MEM_ALIGNMENT 32
 /*----- Default Value for MEM_SIZE: 1600 ---*/
 #define MEM_SIZE 8*1024

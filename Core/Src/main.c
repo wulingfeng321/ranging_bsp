@@ -214,6 +214,7 @@ int main(void)
   MX_USART6_UART_Init();
   MX_FATFS_Init();
   MX_USB_OTG_FS_HCD_Init();
+  MX_LWIP_Init();
   /* USER CODE BEGIN 2 */
 #else
   /* Generated init functions remain available for later CubeMX work.
@@ -235,7 +236,7 @@ int main(void)
   (void)MX_SPDIFRX_Init;
   (void)MX_SPI2_Init;
   (void)MX_TIM1_Init;
-  (void)MX_TIM2_Init;
+  MX_TIM2_Init(); /* D9 / PA15 sync-check pulse; output stays low until lock. */
   (void)MX_TIM3_Init;
   (void)MX_TIM5_Init;
   (void)MX_TIM8_Init;

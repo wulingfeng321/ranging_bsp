@@ -4,6 +4,7 @@
 #include "app_mic_scope.h"
 #include "range_dsp.h"
 #include "range_sync.h"
+#include "range_pps.h"
 #include "range_audio_time.h"
 #if APP_RANGE_JOINT_PEAKS
 #include "range_peak_pair.h"
@@ -130,6 +131,7 @@ static void ClearMeasurements(void)
 
 static void Unlock(void)
 {
+  RangePps_Update(NULL,0);
   RangeSync_Reset(&syncModel); appRangeStatus.locked=0;
   pendingRequest=0; haveResponse=0; ++syncEpoch;
   ClearMeasurements();
@@ -537,6 +539,7 @@ void AppRange_Init(void)
 {
   clockReady=(uint8_t)RangeClock_Init();
   if(!clockReady) { appRangeStatus.error=-1; return; }
+  if(!RangePps_Init()) { clockReady=0; appRangeStatus.error=-1; return; }
   IP_ADDR4(&peer,192,168,10,APP_PEER_HOST);
   pcb=udp_new();
   if(!pcb) { appRangeStatus.error=-2; return; }
@@ -555,6 +558,7 @@ void AppRange_Process(void)
   now=HAL_GetTick();
   if(!appNetStatus.online || connection!=AppNet_PeerSession())
   {
+    RangePps_Update(NULL,0);
     if(connection || appNetStatus.online)
     {
       connection=appNetStatus.online?AppNet_PeerSession():0;
@@ -635,4 +639,6 @@ void AppRange_Process(void)
   }
   now=HAL_GetTick();
   if(appRangeStatus.valid && now-lastResultMs>=APP_RANGE_RESULT_HOLD_MS) appRangeStatus.valid=0;
+  RangePps_Update(APP_BOARD_ROLE==APP_BOARD_B ? &syncModel : NULL,
+                  appRangeStatus.locked);
 }

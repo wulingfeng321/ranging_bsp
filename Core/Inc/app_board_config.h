@@ -5,7 +5,7 @@
 #define APP_BOARD_B 2
 /* Change ONLY this default for the other board, or define it in IAR. */
 #ifndef APP_BOARD_ROLE
-#define APP_BOARD_ROLE APP_BOARD_A
+#define APP_BOARD_ROLE APP_BOARD_B
 #endif
 
 #if APP_BOARD_ROLE == APP_BOARD_A

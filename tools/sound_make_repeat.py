@@ -1,12 +1,14 @@
 """将 sound_make.py 生成的完整音频重复多轮，用于重复测距。
 
 
-默认：每轮保留原有 2.5 秒音频（5 个签名），播放 15 轮，轮间额外
-插入 1.5 秒静音，总长 37.5 秒。原音频自身的尾部静音也完整保留。
+默认：每轮保留原有 2.5 秒音频（5 个签名），播放 3 轮，轮间额外
+插入 1.5 秒静音，形成原有 10.5 秒测量音频；末尾再追加 5 秒静音，
+总长 15.5 秒。原音频自身的尾部静音也完整保留。
 
 用法：
     python tools/sound_make_repeat.py
     python tools/sound_make_repeat.py --repeat 5 --gap-seconds 3
+    python tools/sound_make_repeat.py --tail-seconds 0
     python tools/sound_make_repeat.py --output my_measurements.wav
 
 依赖与原脚本相同：numpy、scipy、soundfile。
@@ -25,8 +27,9 @@ import numpy as np
 import soundfile as sf
 
 
-DEFAULT_REPEAT = 15
+DEFAULT_REPEAT = 3
 DEFAULT_GAP_SECONDS = 1.5
+DEFAULT_TAIL_SECONDS = 5.0
 TOOLS_DIR = Path(__file__).resolve().parent
 
 
@@ -40,7 +43,7 @@ def positive_count(value):
 def nonnegative_seconds(value):
     seconds = float(value)
     if not math.isfinite(seconds) or seconds < 0:
-        raise argparse.ArgumentTypeError("gap-seconds must be finite and >= 0")
+        raise argparse.ArgumentTypeError("seconds must be finite and >= 0")
     return seconds
 
 
@@ -49,6 +52,8 @@ def main():
     parser.add_argument("--repeat", type=positive_count, default=DEFAULT_REPEAT)
     parser.add_argument("--gap-seconds", type=nonnegative_seconds,
                         default=DEFAULT_GAP_SECONDS)
+    parser.add_argument("--tail-seconds", type=nonnegative_seconds,
+                        default=DEFAULT_TAIL_SECONDS)
     parser.add_argument("--output", type=Path,
                         default=TOOLS_DIR / "test_audio_chirp_repeat.wav")
     args = parser.parse_args()
@@ -73,21 +78,25 @@ def main():
 
     gap_samples = round(sample_rate * args.gap_seconds)
     silence = np.zeros(gap_samples, dtype=np.int16)
-    # 流式逐轮写出，不为所有重复音频分配一个大数组；末轮不额外加间隔。
+    tail_samples = round(sample_rate * args.tail_seconds)
+    # 流式逐轮写出；末轮后单独追加静音，留出停止播放和等待统计的时间。
     with sf.SoundFile(output, mode="w", samplerate=sample_rate, channels=1,
                       subtype="PCM_16", format="WAV") as wav:
         for index in range(args.repeat):
             wav.write(audio)
             if index + 1 < args.repeat:
                 wav.write(silence)
+        wav.write(np.zeros(tail_samples, dtype=np.int16))
 
-    total_samples = len(audio) * args.repeat + gap_samples * (args.repeat - 1)
+    total_samples = (len(audio) * args.repeat + gap_samples * (args.repeat - 1)
+                     + tail_samples)
     starts = [(len(audio) + gap_samples) * i / sample_rate
               for i in range(args.repeat)]
     print(f"Saved: {output}")
     print(f"Format: {sample_rate} Hz, mono, PCM_16")
     print(f"Rounds: {args.repeat}; source duration: {len(audio)/sample_rate:.3f} s")
     print(f"Extra gap between rounds: {gap_samples/sample_rate:.3f} s")
+    print(f"Trailing silence: {tail_samples/sample_rate:.3f} s")
     print("Round starts (s): " + ", ".join(f"{t:.3f}" for t in starts))
     print(f"Total: {total_samples} samples, {total_samples/sample_rate:.3f} s")
 
