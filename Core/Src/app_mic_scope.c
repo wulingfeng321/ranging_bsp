@@ -6,7 +6,8 @@
 #include "stm32746g_discovery_lcd.h"
 #include <stdint.h>
 #include <stdio.h>
-#include "mic_scope_trigger.h"
+#include <math.h>
+#include "range_dsp.h"
 
 /* Full-rate stereo PCM; 16 kHz display preview, 160 ms visible, 16 ms DMA half. */
 #define SAMPLE_RATE       APP_AUDIO_SAMPLE_RATE
@@ -15,9 +16,10 @@
 #define HALF_FRAMES      APP_AUDIO_HALF_FRAMES
 #define DMA_WORDS        (HALF_FRAMES * 2U * 2U)
 #define PLOT_WIDTH       480U
-#define REFRESH_MS       150U
+#define REFRESH_NS       ((uint64_t)MIC_SCOPE_REFRESH_MS * 1000000ULL)
+#define PREPARE_NS       ((uint64_t)MIC_SCOPE_PREPARE_MS * 1000000ULL)
 #define RESULT_TIMEOUT_MS APP_RANGE_RESULT_HOLD_MS
-#define PLOT_AMPLITUDE    28
+#define PLOT_AMPLITUDE    15
 #define FRAME_A          0xC0000000U
 #define FRAME_B          0xC0080000U
 /* Reserved SDRAM, covered by main.c's non-cacheable 8 MB MPU region.
@@ -28,15 +30,8 @@ extern SAI_HandleTypeDef haudio_in_sai;
 extern LTDC_HandleTypeDef hLtdcHandler;
 static volatile int16_t history[RING_FRAMES][2];
 static int16_t snapshot[WINDOW_FRAMES][2];
-static int16_t heldWave[WINDOW_FRAMES][2];
-static volatile uint32_t sweepNumber;
-static uint32_t triggerSweep;
-static uint32_t holdTick;
-static uint32_t rearmTick;
-/* 0 = live, 1 = finish current sweep, 2 = held event snapshot. */
-static uint8_t holdState;
-static uint8_t rearmWaiting;
-static uint32_t sweepColumn;
+static uint64_t presentAt;
+static uint8_t framePending;
 static volatile uint32_t writeFrame;
 static volatile uint32_t validFrames;
 volatile uint32_t micDmaBlocks;
@@ -119,12 +114,12 @@ static void DrawDashboard(uint32_t now)
     if(appRangeStatus.batchStage==1) state="COLLECTING 11s";
     else if(appRangeStatus.batchStage==3) state="TOO FEW SAMPLES";
     else if(appRangeStatus.batchStage==4) state="UNSTABLE SAMPLES";
-    else if(appRangeStatus.batchStage==5) state="OUTSIDE 100-200mm";
+    else if(appRangeStatus.batchStage==5) state="OUT OF RANGE";
   }
   BSP_LCD_SetFont(&Font24);
   if(appRangeStatus.peakUncertain) state=fresh ? "LAST / PEAK UNCERTAIN":"PEAK UNCERTAIN";
   Text(12, 44, value, color);
-  BSP_LCD_SetFont(fresh ? &Font16 : &Font12);
+  BSP_LCD_SetFont(&Font12);
   Text(250, 29, state, color);
   BSP_LCD_SetFont(&Font12);
   if(fresh)
@@ -180,6 +175,7 @@ static void DrawDashboard(uint32_t now)
 static void DrawRangeDiagnostics(void)
 {
   char text[64], delta[16];
+  const RangePairDiag *d=&appRangeStatus.pairFailure;
   BSP_LCD_SetFont(&Font12);
   BSP_LCD_SetBackColor(LCD_COLOR_BLACK);
   (void)snprintf(text,sizeof(text),"D:%lu G:%lu O:%lu EQ:%lu",
@@ -188,37 +184,22 @@ static void DrawRangeDiagnostics(void)
     (unsigned long)(appRangeStatus.audioOverruns%10000U),
     (unsigned long)appRangeStatus.eventQuality);
   Text(120,96,text,LCD_COLOR_YELLOW);
-  /* Alternate with the existing counters, keeping the waveform area free. */
-  if((HAL_GetTick()/2000U)%4U==1U) {
-    BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
-    BSP_LCD_FillRect(120,96,360,12);
-    (void)snprintf(text,sizeof(text),"AJ:%luus PS:%lu EQ:%lu",
-      (unsigned long)(appRangeStatus.audioJitterNs/1000U),
-      (unsigned long)appRangeStatus.eventPeakSpreadSamples,
-      (unsigned long)appRangeStatus.eventQuality);
-    Text(120,96,text,LCD_COLOR_YELLOW);
-  }
+  if(d->serial)
+    (void)snprintf(text,sizeof(text),"FAIL#%lu %s A:%u B:%u N:%u RR:%lu%%",
+      (unsigned long)(d->serial%10000U),
+      d->reason==1 ? "AM":(d->reason==2 ? "OV":(d->reason==3 ? "IC":"BAD")),
+      (unsigned)d->countA,(unsigned)d->countB,(unsigned)d->pairs,
+      (unsigned long)(d->bestScore ? (100U*d->runnerScore/d->bestScore):0));
+  else (void)snprintf(text,sizeof(text),"FAIL:-- (NO REJECTED PAIR)");
+  Text(0,108,text,LCD_COLOR_YELLOW);
 #if APP_RANGE_JOINT_PEAKS
-  if((HAL_GetTick()/2000U)%4U==2U) {
-    BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
-    BSP_LCD_FillRect(120,96,360,12);
-    (void)snprintf(text,sizeof(text),"PK:%lu AM:%lu IC:%lu DS:%luus",
-      (unsigned long)appRangeStatus.peakCandidates,
-      (unsigned long)(appRangeStatus.peakAmbiguous%10000U),
-      (unsigned long)(appRangeStatus.peakInconsistent%10000U),
-      (unsigned long)(appRangeStatus.peakPairSpreadNs/1000U));
-    Text(120,96,text,LCD_COLOR_YELLOW);
-  }
+  (void)snprintf(text,sizeof(text),"PK:%lu AM:%lu IC:%lu DS:%luus",
+    (unsigned long)appRangeStatus.peakCandidates,
+    (unsigned long)(appRangeStatus.peakAmbiguous%10000U),
+    (unsigned long)(appRangeStatus.peakInconsistent%10000U),
+    (unsigned long)(appRangeStatus.peakPairSpreadNs/1000U));
+  Text(0,120,text,LCD_COLOR_YELLOW);
 #endif
-  if((HAL_GetTick()/2000U)%4U==3U) {
-    BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
-    BSP_LCD_FillRect(120,96,360,12);
-    (void)snprintf(text,sizeof(text),"DSP:%lu%% MAX:%luus BK:%lums",
-      (unsigned long)(appRangeStatus.dspLoadPermille/10),
-      (unsigned long)appRangeStatus.dspMaxUs,
-      (unsigned long)((uint64_t)appRangeStatus.backlogSamples*1000/APP_AUDIO_SAMPLE_RATE));
-    Text(120,96,text,LCD_COLOR_YELLOW);
-  }
   if(APP_BOARD_ROLE==APP_BOARD_A)
   {
     if(appRangeStatus.pairDeltaValid)
@@ -236,6 +217,34 @@ static void DrawRangeDiagnostics(void)
       (unsigned long)(appRangeStatus.results%10000U),
       (unsigned long)(appRangeStatus.rejected%10000U));
   Text(120,184,text,LCD_COLOR_YELLOW);
+#if APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_LEGACY
+  (void)snprintf(text,sizeof(text),"CG:%lu F1:%lu F2:%lu F3:%lu",
+    (unsigned long)(rangeDspDiagnostics.coarsePassed%1000000U),
+    (unsigned long)(rangeDspDiagnostics.failPulse[0]%1000000U),
+    (unsigned long)(rangeDspDiagnostics.failPulse[1]%1000000U),
+    (unsigned long)(rangeDspDiagnostics.failPulse[2]%1000000U));
+  Text(0,132,text,LCD_COLOR_WHITE);
+  (void)snprintf(text,sizeof(text),"GP:%lu OK:%lu NC:%lu OV:%lu",
+    (unsigned long)(rangeDspDiagnostics.gapRejected%1000000U),
+    (unsigned long)(rangeDspDiagnostics.signatures%1000000U),
+    (unsigned long)(rangeDspDiagnostics.noCandidates%1000000U),
+    (unsigned long)(rangeDspDiagnostics.candidateOverflow%1000000U));
+  Text(0,196,text,LCD_COLOR_YELLOW);
+  if(d->bestA)
+    (void)snprintf(text,sizeof(text),"BEST:%ldus Q:%lu S:%luns A%uB%u",
+      (long)(d->bestNs/1000),(unsigned long)d->bestScore,
+      (unsigned long)d->bestSpanNs,(unsigned)d->bestA,(unsigned)d->bestB);
+  else (void)snprintf(text,sizeof(text),"BEST:--");
+  Text(0,208,text,LCD_COLOR_CYAN);
+  if(d->runnerA)
+    (void)snprintf(text,sizeof(text),"NEXT:%ldus Q:%lu S:%luns A%uB%u",
+      (long)(d->runnerNs/1000),(unsigned long)d->runnerScore,
+      (unsigned long)d->runnerSpanNs,(unsigned)d->runnerA,(unsigned)d->runnerB);
+  else (void)snprintf(text,sizeof(text),"NEXT:--");
+  Text(0,220,text,LCD_COLOR_WHITE);
+#else
+  Text(0,196,"STAGE DIAGNOSTICS: LEGACY ONLY",LCD_COLOR_YELLOW);
+#endif
 }
 
 /* Called only for the DMA half that has finished receiving. */
@@ -249,8 +258,7 @@ static void StoreHalf(uint32_t wordOffset)
   {
     history[pos][0] = src[wordOffset + 2U * i];
     history[pos][1] = src[wordOffset + 2U * i + 1U];
-    /* Fixed horizontal slots: wrap at one screen, never shift old samples. */
-    if (++pos == RING_FRAMES) { pos = 0; ++sweepNumber; }
+    if (++pos == RING_FRAMES) pos = 0;
   }
   writeFrame = pos;
   if (validFrames < RING_FRAMES)
@@ -299,7 +307,7 @@ static void DrawChannel(uint32_t channel, int32_t mean, int32_t scale)
 {
   uint32_t x, i, begin, end;
   uint16_t top = (uint16_t)(96U + channel * 88U);
-  int32_t center = top + 49;
+  int32_t center = top + 68;
   int32_t low, high, y0, y1;
 
   BSP_LCD_SetFont(&Font12);
@@ -309,8 +317,8 @@ static void DrawChannel(uint32_t channel, int32_t mean, int32_t scale)
       "LOCAL MIC L" : "LOCAL MIC R"), LEFT_MODE);
   BSP_LCD_SetTextColor(0xFF404040U);
   for (x = 0; x < PLOT_WIDTH; x += 60)
-    BSP_LCD_DrawVLine((uint16_t)x, top + 20, 61);
-  for (i = top + 21; i <= top + 77; i += 14)
+    BSP_LCD_DrawVLine((uint16_t)x, top + 52, 33);
+  for (i = top + 53; i <= top + 83; i += 15)
     BSP_LCD_DrawHLine(0, (uint16_t)i, PLOT_WIDTH);
   BSP_LCD_SetTextColor(LCD_COLOR_WHITE);
   BSP_LCD_DrawHLine(0, (uint16_t)center, PLOT_WIDTH);
@@ -318,9 +326,6 @@ static void DrawChannel(uint32_t channel, int32_t mean, int32_t scale)
   BSP_LCD_SetTextColor(channel == 0 ? LCD_COLOR_GREEN : LCD_COLOR_CYAN);
   for (x = 0; x < PLOT_WIDTH; ++x)
   {
-    BSP_LCD_SetTextColor(channel == 0 ?
-        (holdState == 2 || x < sweepColumn ? LCD_COLOR_GREEN : 0xFF008000U) :
-        (holdState == 2 || x < sweepColumn ? LCD_COLOR_CYAN : 0xFF008080U));
     begin = x * WINDOW_FRAMES / PLOT_WIDTH;
     end = (x + 1U) * WINDOW_FRAMES / PLOT_WIDTH;
     low = high = snapshot[begin][channel];
@@ -337,7 +342,9 @@ static void DrawChannel(uint32_t channel, int32_t mean, int32_t scale)
 
 void MicScope_Process(void)
 {
-  uint32_t now, i, c, irqMask, capturedWrite, capturedSweep;
+  uint32_t now, i, c, capturedBlocks, pos;
+  uint64_t masterNs = 0;
+  int synced, haveWave;
   int32_t mean[2] = {0, 0};
   int32_t scale = 512; /* Limit amplification of the silence noise floor. */
   int32_t magnitude;
@@ -352,56 +359,55 @@ void MicScope_Process(void)
     audioStatus = "MIC DATA ERROR";
     AppRange_AudioError();
     started = 0;
-    holdState = 0;
   }
-  if (now - lastDraw < REFRESH_MS ||
-      (LTDC->SRCR & LTDC_SRCR_VBR) || !AppRange_DisplayReady()) return;
-  lastDraw = now;
-
-  if (started && validFrames >= WINDOW_FRAMES)
+  synced = AppRange_MasterTime(&masterNs);
+  if (!synced)
   {
-    if (holdState == 2 && now - holdTick >= MIC_SCOPE_HOLD_MS)
+    /* Discard a prepared frame from the old synchronization generation. */
+    if (presentAt) lastDraw = now - MIC_SCOPE_REFRESH_MS;
+    presentAt = 0;
+    framePending = 0;
+  }
+  if (LTDC->SRCR & LTDC_SRCR_VBR) return;
+  if (synced)
+  {
+    if (framePending)
     {
-      holdState = 0;
-      rearmWaiting = 1;
-      rearmTick = now;
+      if (masterNs < presentAt) return;
+      /* Presentation is cheap: never defer an already drawn frame for DSP.
+       * Skip stale frames after a main-loop stall instead of catching up. */
+      if (masterNs - presentAt < REFRESH_NS)
+      {
+        BSP_LCD_SetLayerAddress_NoReload(0, backBuffer);
+        BSP_LCD_Reload(LCD_RELOAD_VERTICAL_BLANKING);
+        backBuffer = (backBuffer == FRAME_A) ? FRAME_B : FRAME_A;
+      }
+      framePending = 0;
+      presentAt = (masterNs / REFRESH_NS + 1U) * REFRESH_NS;
+      return;
     }
-    if (rearmWaiting && now - rearmTick >= 160U) rearmWaiting = 0;
+    if (!presentAt || masterNs >= presentAt)
+      presentAt = (masterNs / REFRESH_NS + 1U) * REFRESH_NS;
+    if (masterNs + PREPARE_NS < presentAt) return;
+  }
+  else if (now - lastDraw < MIC_SCOPE_REFRESH_MS) return;
+  if (!AppRange_DisplayReady()) return;
+
+  haveWave = synced && started && validFrames >= WINDOW_FRAMES;
+  if (haveWave)
+  {
     /* Do not mask DMA interrupts during the waveform copy: their arrival
      * anchors are used for ranging. Retry next frame if an ISR changed data. */
-    irqMask = micDmaBlocks;
-    /* Copy in physical slot order, not oldest-to-newest order. Both channels
-     * and the cursor are captured together so they cannot drift apart. */
-    sweepColumn = writeFrame * PLOT_WIDTH / WINDOW_FRAMES;
-    capturedWrite = writeFrame;
-    capturedSweep = sweepNumber;
+    capturedBlocks = micDmaBlocks;
+    pos = writeFrame; /* Oldest sample of the complete 160 ms window. */
     for (i = 0; i < WINDOW_FRAMES; ++i)
     {
-      snapshot[i][0] = history[i][0];
-      snapshot[i][1] = history[i][1];
+      snapshot[i][0] = history[pos][0];
+      snapshot[i][1] = history[pos][1];
+      if (++pos == WINDOW_FRAMES) pos = 0;
     }
     __DMB();
-    if (irqMask != micDmaBlocks) return;
-    if (holdState == 1 && capturedSweep != triggerSweep)
-    {
-      holdState = 2;
-      holdTick = now;
-    }
-    if (holdState == 0 && !rearmWaiting && MIC_SCOPE_HOLD_MS > 0U &&
-        MicScope_IsChirpCandidate(snapshot, WINDOW_FRAMES, capturedWrite,
-                                 MIC_SCOPE_TRIGGER_MIN_LEVEL))
-    {
-      /* Keep a chronological event window, including a boundary-crossing
-       * signature. Display it only once the current live sweep has ended. */
-      for (i = 0; i < WINDOW_FRAMES; ++i)
-        for (c = 0; c < 2; ++c)
-          heldWave[i][c] = snapshot[(capturedWrite + i) % WINDOW_FRAMES][c];
-      triggerSweep = capturedSweep;
-      holdState = 1;
-    }
-    if (holdState == 2)
-      for (i = 0; i < WINDOW_FRAMES; ++i)
-        for (c = 0; c < 2; ++c) snapshot[i][c] = heldWave[i][c];
+    if (capturedBlocks != micDmaBlocks) return;
     for (i = 0; i < WINDOW_FRAMES; ++i)
       for (c = 0; c < 2; ++c) mean[c] += snapshot[i][c];
     mean[0] /= (int32_t)WINDOW_FRAMES;
@@ -421,19 +427,28 @@ void MicScope_Process(void)
   hLtdcHandler.LayerCfg[0].FBStartAdress = backBuffer;
   BSP_LCD_Clear(LCD_COLOR_BLACK);
   DrawDashboard(now);
-  if (started && validFrames >= WINDOW_FRAMES)
+  if (haveWave)
   {
     DrawChannel(0, mean[0], scale);
     DrawChannel(1, mean[1], scale);
-    DrawRangeDiagnostics();
   }
   else
   {
-    BSP_LCD_SetFont(&Font16);
-    Text(12, 140, started ? "Waiting for audio samples..." :
-         "Audio unavailable: check MIC / DMA", LCD_COLOR_YELLOW);
+    BSP_LCD_SetFont(&Font12);
+    Text(0,96,"LOCAL MIC L",LCD_COLOR_WHITE);
+    Text(0,184,"LOCAL MIC R",LCD_COLOR_WHITE);
+    Text(12, 150, !started ? "Audio unavailable: check MIC / DMA" :
+         (!synced ? "Waiting for clock sync..." : "Waiting for audio samples..."),
+         LCD_COLOR_YELLOW);
   }
+  DrawRangeDiagnostics();
+  lastDraw = now;
   __DSB();
+  if (synced)
+  {
+    framePending = 1;
+    return; /* The main loop keeps sampling/processing until the shared tick. */
+  }
   BSP_LCD_SetLayerAddress_NoReload(0, backBuffer);
   BSP_LCD_Reload(LCD_RELOAD_VERTICAL_BLANKING);
   backBuffer = (backBuffer == FRAME_A) ? FRAME_B : FRAME_A;

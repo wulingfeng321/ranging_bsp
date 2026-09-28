@@ -35,7 +35,7 @@
 #define APP_AUDIO_SAMPLE_NS (1000000000.0 / APP_AUDIO_SAMPLE_RATE)
 /* Experimental ranging configuration: same on BOTH boards. */
 #define APP_RANGE_PORT 5001U
-#define APP_TEMPERATURE_DECI_C 200 /* 20.0 degrees Celsius; manually set ambient */
+#define APP_TEMPERATURE_DECI_C 250 /* 25.0 degrees Celsius; manually set ambient */
 #define APP_RANGE_BIAS_NS 0LL /* calibrated fixed (B-A) audio delay, ns */
 #define APP_RANGE_RESULT_HOLD_MS 15000U /* Time to read a test result. */
 /* Candidate protocol: update BOTH boards; set 0 for old pairing. */
@@ -69,6 +69,8 @@
 #define APP_RANGE_BATCH_MIN_SAMPLES 6U
 #define APP_RANGE_BATCH_MIN_PERCENT 60U
 #define APP_RANGE_BATCH_MAX_SPAN_MM 40U
+#define APP_RANGE_BATCH_MIN_MM 100
+#define APP_RANGE_BATCH_MAX_MM 2000
 #define APP_RANGE_BATCH_MS 11000U /* 10.5 s WAV, anchored at first paired event */
 /* Bring-up profile: build BOTH boards with the same setting. Set to 0 to
  * restore the original detector thresholds after acoustic validation. */

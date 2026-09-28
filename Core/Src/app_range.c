@@ -32,6 +32,7 @@ static uint64_t batchFirstEventNs, batchLastEventNs;
 #define BATCH_STATE 8U
 #define PEAK_EVENT 9U
 #define PEAK_STATE 10U
+#define PEAK_DIAG 11U
 #define AUDIO_RING (APP_AUDIO_SAMPLE_RATE == 48000U ? 32768U : 8192U)
 #define RANGE_WIRE_VERSION (APP_AUDIO_SAMPLE_RATE == 48000U ? 3U : 2U)
 extern struct netif gnetif;
@@ -125,6 +126,7 @@ static void ClearMeasurements(void)
   pendingEventId=0; pendingResultId=0; appRangeStatus.valid=0;
   appRangeStatus.pairDeltaValid=0;
   appRangeStatus.peakUncertain=0;
+  memset(&appRangeStatus.pairFailure,0,sizeof(appRangeStatus.pairFailure));
 #if APP_RANGE_JOINT_PEAKS
   peakStateId=0;
 #endif
@@ -234,6 +236,15 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
   else
   {
 #if APP_RANGE_JOINT_PEAKS
+    if(type==PEAK_DIAG && appRangeStatus.locked && epoch==syncEpoch) {
+      RangePairDiag diag;
+      if(!RangePairDiag_Decode(&diag,x,y,z,G64(bytes+56),G64(bytes+64))) goto reject;
+      if(!appRangeStatus.pairFailure.serial ||
+         (diag.serial-appRangeStatus.pairFailure.serial!=0 &&
+          diag.serial-appRangeStatus.pairFailure.serial<0x80000000UL))
+        appRangeStatus.pairFailure=diag;
+      return;
+    }
     if(type==PEAK_STATE && appRangeStatus.locked && epoch==syncEpoch && x<=1 &&
        y<=UINT32_MAX && z<=UINT32_MAX && G64(bytes+56)<=3 && G64(bytes+64)<=APP_RANGE_PEAK_SPREAD_NS) {
       if(peakStateId && (id==peakStateId || id-peakStateId>=0x80000000UL)) goto reject;
@@ -431,6 +442,16 @@ static void AudioProcess(void)
   if(scan>=RANGE_SCAN_ADVANCE) { haveWindow=0; readSample+=RANGE_SCAN_ADVANCE; }
 }
 
+int AppRange_MasterTime(uint64_t *masterNs)
+{
+  uint64_t localNs;
+  if (!clockReady || !appNetStatus.online || !appRangeStatus.locked) return 0;
+  localNs = RangeClock_Now();
+  *masterNs = APP_BOARD_ROLE == APP_BOARD_B ?
+              RangeSync_Master(&syncModel, localNs) : localNs;
+  return 1;
+}
+
 int AppRange_DisplayReady(void)
 {
   uint64_t count;
@@ -478,9 +499,13 @@ static void PairEvents(void)
       localEvents[i].used=0; remoteEvents[j].used=0;
 #if APP_RANGE_JOINT_PEAKS
       {
-        int paired=RangePeak_Pair(&localEvents[i].peaks,&remoteEvents[j].peaks,delta,
-                                 &delta,&resultQuality,&appRangeStatus.peakPairSpreadNs);
+        RangePairDiag diag;
+        int paired=RangePeak_PairDetailed(&localEvents[i].peaks,&remoteEvents[j].peaks,delta,
+                                 &delta,&resultQuality,&appRangeStatus.peakPairSpreadNs,&diag);
         if(paired!=1) {
+          diag.serial=appRangeStatus.pairFailure.serial+1U;
+          if(!diag.serial) diag.serial=1;
+          appRangeStatus.pairFailure=diag;
           if(paired==2) ++appRangeStatus.peakAmbiguous;
           else ++appRangeStatus.peakInconsistent;
           appRangeStatus.peakUncertain=1;
@@ -632,6 +657,13 @@ void AppRange_Process(void)
       Send(PEAK_STATE,++sequence,peerEpoch,appRangeStatus.peakUncertain,
            appRangeStatus.peakAmbiguous,appRangeStatus.peakInconsistent,
            appRangeStatus.peakCandidates,appRangeStatus.peakPairSpreadNs);
+      if(appRangeStatus.pairFailure.serial) {
+        const RangePairDiag *d=&appRangeStatus.pairFailure;
+        Send(PEAK_DIAG,++sequence,peerEpoch,RangePairDiag_Meta(d),
+             ((uint64_t)(uint32_t)d->bestNs<<32)|(uint32_t)d->runnerNs,
+             ((uint64_t)d->bestScore<<32)|d->runnerScore,
+             ((uint64_t)d->bestSpanNs<<32)|d->runnerSpanNs,d->serial);
+      }
     }
 #endif
     /* PairEvents/DisplayResult stamp their new result using fresh ticks. */

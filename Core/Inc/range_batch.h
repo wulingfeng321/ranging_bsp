@@ -53,7 +53,7 @@ static void RangeBatch_Finish(RangeBatch *b)
      b->span>APP_RANGE_BATCH_MAX_SPAN_MM) { b->stage=4; return; }
   b->estimate=RangeBatch_Median(sorted+best,b->used);
   center=b->estimate<0 ? -b->estimate : b->estimate;
-  b->stage=(center>=100 && center<=200) ? 2 : 5;
+  b->stage=(center>=APP_RANGE_BATCH_MIN_MM && center<=APP_RANGE_BATCH_MAX_MM) ? 2 : 5;
 }
 static void RangeBatch_Add(RangeBatch *b,int32_t mm,uint32_t quality,uint32_t now)
 {

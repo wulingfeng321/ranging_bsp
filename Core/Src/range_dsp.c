@@ -17,6 +17,7 @@
 #include <string.h>
 typedef char TemplateLengthCheck[(sizeof(rangeUp)/sizeof(rangeUp[0]) == RANGE_PULSE_SAMPLES) ? 1 : -1];
 uint32_t rangeDspPeakSpreadSamples;
+RangeDspDiagnostics rangeDspDiagnostics;
 #ifdef RANGE_DSP_PROFILE
 uint64_t rangeDspMacs;
 #define COUNT_MACS(n) (rangeDspMacs+=(n))
@@ -84,7 +85,11 @@ int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
    * repeatedly hit a correlation null on a 125 us grid. */
   for (k = first; k < end; k += 3*APP_AUDIO_SCALE)
   {
-    if (CoarseScore(x + k) < APP_RANGE_COARSE_SCORE) continue;
+    unsigned passed=0;
+    v=CoarseScore(x + k);
+    if(v>rangeDspDiagnostics.coarseMax) rangeDspDiagnostics.coarseMax=v;
+    if (v < APP_RANGE_COARSE_SCORE) continue;
+    ++rangeDspDiagnostics.coarsePassed;
     peak = 0; best = k; bestJoint = 0;
     /* Use all three pulses to choose a common arrival, rather than letting
      * a distorted first pulse choose a sidelobe for the complete signature.
@@ -92,21 +97,37 @@ int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
     for (j = k > 8*APP_AUDIO_SCALE ? k - 8*APP_AUDIO_SCALE : 0; j <= k + 8*APP_AUDIO_SCALE && j <= RANGE_SCAN_ADVANCE; ++j)
     {
       v = Score(x + j, rangeUp);
+      if(v>rangeDspDiagnostics.pulseMax[0]) rangeDspDiagnostics.pulseMax[0]=v;
       if (v < MIN_SCORE) continue;
+      if(passed<1) passed=1;
       down = Score(x + j + RANGE_PULSE_STEP, rangeDown);
+      if(down>rangeDspDiagnostics.pulseMax[1]) rangeDspDiagnostics.pulseMax[1]=down;
       if (down < MIN_SCORE) continue;
+      if(passed<2) passed=2;
       up2 = Score(x + j + (2*RANGE_PULSE_STEP), rangeUp);
+      if(up2>rangeDspDiagnostics.pulseMax[2]) rangeDspDiagnostics.pulseMax[2]=up2;
       if (up2 < MIN_SCORE) continue;
       joint = v + down + up2;
       if (joint > bestJoint) { bestJoint = joint; peak = v; best = j; }
     }
-    if (peak < MIN_SCORE) continue;
+    if (peak < MIN_SCORE) { ++rangeDspDiagnostics.failPulse[passed]; continue; }
     down = Score(x + best + RANGE_PULSE_STEP, rangeDown);
     up2 = Score(x + best + (2*RANGE_PULSE_STEP), rangeUp);
-    if (down < MIN_SCORE || up2 < MIN_SCORE) continue;
+    if (down < MIN_SCORE || up2 < MIN_SCORE) {
+      ++rangeDspDiagnostics.failPulse[down<MIN_SCORE ? 1:2]; continue;
+    }
     v = Energy(x + best, RANGE_PULSE_SAMPLES);
-    if (Energy(x + best + RANGE_PULSE_SAMPLES, 128*APP_AUDIO_SCALE) > v * APP_RANGE_MAX_GAP_ENERGY_RATIO ||
-        Energy(x + best + (RANGE_PULSE_STEP+RANGE_PULSE_SAMPLES), 128*APP_AUDIO_SCALE) > v * APP_RANGE_MAX_GAP_ENERGY_RATIO) continue;
+    {
+      float gap1=Energy(x + best + RANGE_PULSE_SAMPLES,128*APP_AUDIO_SCALE);
+      float gap2=Energy(x + best + RANGE_PULSE_STEP+RANGE_PULSE_SAMPLES,128*APP_AUDIO_SCALE);
+      float ratio=(gap1>gap2 ? gap1:gap2)/v;
+      if(!rangeDspDiagnostics.haveGap || ratio<rangeDspDiagnostics.gapMinRatio)
+        rangeDspDiagnostics.gapMinRatio=ratio;
+      rangeDspDiagnostics.haveGap=1;
+      if(gap1>v*APP_RANGE_MAX_GAP_ENERGY_RATIO || gap2>v*APP_RANGE_MAX_GAP_ENERGY_RATIO) {
+        ++rangeDspDiagnostics.gapRejected; continue;
+      }
+    }
     shift = 0;
     if (best > 0 && best < RANGE_SCAN_ADVANCE)
     {
@@ -145,6 +166,7 @@ int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
       }
       rangeDspPeakSpreadSamples=(uint32_t)(hi-lo);
     }
+    ++rangeDspDiagnostics.signatures;
     return 1;
   }
   return 0;
@@ -291,6 +313,8 @@ void RangeDsp_Candidates(const int16_t *x,float position,RangeDspPeaks *out)
   for(i=0;i<out->count;++i) out->peak[i]=candidates[i];
   if(n>RANGE_MAX_PEAKS && candidates[RANGE_MAX_PEAKS].quality*100>=strongest*APP_RANGE_PEAK_RUNNER_PERCENT)
     out->overflow=1;
+  if(!out->count) ++rangeDspDiagnostics.noCandidates;
+  if(out->overflow) ++rangeDspDiagnostics.candidateOverflow;
 }
 
 int RangeDsp_Distance(int64_t deltaNs, int32_t temperatureDeciC,

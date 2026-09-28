@@ -31,7 +31,8 @@ int main(void)
     Inject(EVENT,10,7,stamp+378546,950,0); PairEvents();
     assert(!displays); /* Mixed old firmware cannot bypass joint matching. */
     InjectPeaks(11,stamp+378546,&remote); PairEvents();
-    assert(displays==1 && appRangeStatus.distanceMm==130 && batch.count==1);
+    /* 378.546 us at the current 25 C setting rounds to 131 mm. */
+    assert(displays==1 && appRangeStatus.distanceMm==131 && batch.count==1);
     InjectPeaks(11,stamp+378546,&remote); PairEvents();
     assert(displays==1 && appRangeStatus.eventRx==1); /* Retransmission is not a new event. */
     clockNs+=500000000; stamp+=500000000;
@@ -40,6 +41,9 @@ int main(void)
     remote.peak[1].quality=930;
     DetectionReady(stamp,950); InjectPeaks(12,stamp+378546,&remote); PairEvents();
     assert(displays==1 && batch.count==1 && appRangeStatus.peakAmbiguous==1 && appRangeStatus.peakUncertain);
+    assert(appRangeStatus.pairFailure.serial==1 && appRangeStatus.pairFailure.reason==1);
+    assert(appRangeStatus.pairFailure.bestNs==378546 && appRangeStatus.pairFailure.runnerNs==523546);
+    assert(appRangeStatus.pairFailure.bestScore==902500 && appRangeStatus.pairFailure.runnerScore==883500);
     /* Malformed fields, old epoch and wrong profile never create events. */
     i=appRangeStatus.eventRx;
     Inject(PEAK_EVENT,13,6,stamp,65537,RangePeak_Pack(&remote.peak[0]));
@@ -50,7 +54,8 @@ int main(void)
     clockNs+=500000000; stamp+=500000000;
     remote=OnePeak(-145594,900);
     DetectionReady(stamp,950); InjectPeaks(14,stamp+524140,&remote); PairEvents();
-    assert(displays==2 && appRangeStatus.distanceMm==130 && !appRangeStatus.peakUncertain && batch.count==2);
+    assert(displays==2 && appRangeStatus.distanceMm==131 && !appRangeStatus.peakUncertain && batch.count==2);
+    assert(appRangeStatus.pairFailure.serial==1 && appRangeStatus.pairFailure.runnerNs==523546);
   } else {
     /* Master conversion includes clock slope across the full pulse spacing. */
     syncModel.slope=0.00004; syncModel.origin=(double)stamp; syncModel.offset=1000000;
@@ -74,11 +79,29 @@ int main(void)
     assert(appRangeStatus.peakUncertain);
     Inject(PEAK_STATE,99,7,0,0,0); assert(appRangeStatus.peakUncertain);
     Inject(RESULT,103,7,130,1,900); assert(!appRangeStatus.peakUncertain);
+    {
+      RangePairDiag d={0};
+      d.serial=5; d.reason=1; d.countA=2; d.countB=1; d.pairs=2;
+      d.bestA=1; d.bestB=1; d.runnerA=2; d.runnerB=1;
+      d.bestNs=-2885000; d.runnerNs=-3000000;
+      d.bestScore=500000; d.runnerScore=450000; d.bestSpanNs=1250; d.runnerSpanNs=37500;
+      testPayloadU=((uint64_t)d.bestSpanNs<<32)|d.runnerSpanNs; testPayloadV=d.serial;
+      Inject(PEAK_DIAG,104,7,RangePairDiag_Meta(&d),
+        ((uint64_t)(uint32_t)d.bestNs<<32)|(uint32_t)d.runnerNs,
+        ((uint64_t)d.bestScore<<32)|d.runnerScore);
+      assert(appRangeStatus.pairFailure.serial==5 && appRangeStatus.pairFailure.runnerNs==-3000000);
+      testPayloadV=4; Inject(PEAK_DIAG,105,7,RangePairDiag_Meta(&d),0,0);
+      assert(appRangeStatus.pairFailure.serial==5);
+      testPayloadV=6; Inject(PEAK_DIAG,106,6,RangePairDiag_Meta(&d),0,0);
+      assert(appRangeStatus.pairFailure.serial==5);
+      testPayloadU=0; testPayloadV=0;
+    }
   }
   /* Continuous old audio at the enlarged window, no network pairing mocks. */
   {
     int16_t pcm[APP_AUDIO_HALF_FRAMES*2]; uint32_t before=appRangeStatus.events;
     ClearMeasurements(); appRangeStatus.locked=1;
+    assert(!appRangeStatus.pairFailure.serial);
     for(i=0;i<24576*APP_AUDIO_SCALE;i+=APP_AUDIO_HALF_FRAMES) {
       for(k=0;k<APP_AUDIO_HALF_FRAMES;++k) {
         int at=(int)((i+k)%(APP_AUDIO_SAMPLE_RATE/2))-129*APP_AUDIO_SCALE; int16_t v=0;

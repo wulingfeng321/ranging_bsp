@@ -31,6 +31,17 @@ void RangeDsp_Candidates(const int16_t *x, float position, RangeDspPeaks *peaks)
 /* Last accepted signature: local per-pulse peak spread, in sample units.
  * Diagnostic only; it does not establish a direct acoustic path. */
 extern uint32_t rangeDspPeakSpreadSamples;
+/* Local LEGACY diagnostics, main loop only, retained until reboot. Counts are
+ * search attempts, NOT transmitted signatures. Each coarse pass ends in one
+ * of failPulse[0..2], gapRejected or signatures. Maxima are independent and
+ * reuse evaluated correlations (later pulses are short-circuit gated). */
+typedef struct {
+  uint32_t coarsePassed, failPulse[3], gapRejected, signatures;
+  uint32_t noCandidates, candidateOverflow;
+  float coarseMax, pulseMax[3], gapMinRatio;
+  uint8_t haveGap;
+} RangeDspDiagnostics;
+extern RangeDspDiagnostics rangeDspDiagnostics;
 /* Search [first, end) template-start positions, at most RANGE_SCAN_SLICE starts per call.
  * Returns a fractional sample position; polarity invariant correlation. */
 int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,

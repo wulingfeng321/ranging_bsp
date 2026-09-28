@@ -1,6 +1,7 @@
 #ifndef APP_RANGE_H
 #define APP_RANGE_H
 #include <stdint.h>
+#include "range_pair_diag.h"
 /* Hardware PTP timestamps and audio anchors are nanoseconds, local monotonic
  * epoch. No UTC and no timestamp is taken at the end of signal processing. */
 typedef struct {
@@ -24,12 +25,15 @@ typedef struct {
   uint8_t resultIsStat; /* 0 single-shot preview, 1 accepted batch estimate. */
   uint32_t peakAmbiguous, peakInconsistent, peakCandidates, peakPairSpreadNs;
   uint8_t peakUncertain; /* Last compared event rejected; old display is not refreshed. */
+  RangePairDiag pairFailure; /* Latched until reset/session change or next failure. */
 } AppRangeStatus;
 extern AppRangeStatus appRangeStatus;
 void AppRange_Init(void);
 void AppRange_Process(void);
 /* Main-loop display admission: give the detector time to drain its backlog. */
 int AppRange_DisplayReady(void);
+/* Main loop only: nanoseconds in board A's epoch, available while synchronized. */
+int AppRange_MasterTime(uint64_t *masterNs);
 /* ISR only: interleaved stereo input, frame count APP_AUDIO_HALF_FRAMES, selected channel L.
  * Data is copied before returning. AudioError invalidates pending events. */
 void AppRange_Audio(const volatile int16_t *pcm, uint32_t frames);
