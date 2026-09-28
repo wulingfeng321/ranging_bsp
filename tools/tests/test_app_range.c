@@ -9,6 +9,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "../../Core/Src/app_range.c"
+void AppCapture_Audio(const volatile int16_t *p,uint32_t n,uint64_t c,uint64_t t,uint32_t e)
+{ (void)p;(void)n;(void)c;(void)t;(void)e; }
+void AppCapture_Trigger(void) {}
+void AppCapture_Log(const char *format,...) { (void)format; }
+int AppCapture_Busy(void) { return 0; }
 #if APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_LEGACY
 #if APP_AUDIO_SAMPLE_RATE == 48000U
 #include "range_template_48k.h"

@@ -45,7 +45,8 @@ void MX_FATFS_Init(void)
 DWORD get_fattime(void)
 {
   /* USER CODE BEGIN get_fattime */
-  return 0;
+  /* No RTC calendar is configured. Valid fixed date; run IDs are authoritative. */
+  return ((DWORD)(2026-1980)<<25)|((DWORD)9<<21)|((DWORD)28<<16);
   /* USER CODE END get_fattime */
 }
 

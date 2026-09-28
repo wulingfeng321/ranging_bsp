@@ -30,6 +30,8 @@ typedef struct {
 extern AppRangeStatus appRangeStatus;
 void AppRange_Init(void);
 void AppRange_Process(void);
+/* Recorder transaction only: clears round counters and restarts synchronization. */
+void AppRange_ResetRound(void);
 /* Main-loop display admission: give the detector time to drain its backlog. */
 int AppRange_DisplayReady(void);
 /* Main loop only: nanoseconds in board A's epoch, available while synchronized. */

@@ -1106,6 +1106,12 @@
           <name>$PROJ_DIR$\..\Core\Src\app_range.c</name>
         </file>
         <file>
+          <name>$PROJ_DIR$\..\Core\Src\app_capture.c</name>
+        </file>
+        <file>
+          <name>$PROJ_DIR$\..\Core\Src\capture_sd.c</name>
+        </file>
+        <file>
           <name>$PROJ_DIR$\..\Core\Src\range_clock.c</name>
         </file>
         <file>

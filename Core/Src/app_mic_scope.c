@@ -1,4 +1,5 @@
 #include "app_mic_scope.h"
+#include "app_capture.h"
 #include "app_net.h"
 #include "app_range.h"
 #include "app_board_config.h"
@@ -82,20 +83,16 @@ static void DrawDashboard(uint32_t now)
                   now - resultTick < RESULT_TIMEOUT_MS;
   BSP_LCD_SetBackColor(LCD_COLOR_BLACK);
   BSP_LCD_SetFont(&Font16);
-#if APP_RANGE_JOINT_PEAKS
-  Text(12, 4, APP_AUDIO_SAMPLE_RATE==48000U ? "JOINT2 48k":"JOINT2 16k", LCD_COLOR_CYAN);
-#elif APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_WIDE
-  Text(12, 4, APP_AUDIO_SAMPLE_RATE==48000U ? "WIDE1 48k":"WIDE1 16k", LCD_COLOR_CYAN);
-#else
-  Text(12, 4, "RANGE LEGACY", LCD_COLOR_CYAN);
-#endif
+  BSP_LCD_SetFont(&Font12);
+  Text(12, 4, AppCapture_Text(), AppCapture_Busy() ? LCD_COLOR_YELLOW : LCD_COLOR_CYAN);
   BSP_LCD_SetFont(&Font12);
   (void)snprintf(netText, sizeof(netText), "%s NET %s OK:%lu", APP_BOARD_NAME,
                  appNetStatus.initError ? "ERROR" :
                  (appNetStatus.online ? "ONLINE" : "WAIT"),
                  (unsigned long)appNetStatus.testAck);
   Text(250, 4, netText, appNetStatus.online ? LCD_COLOR_GREEN : LCD_COLOR_YELLOW);
-  Text(12, 27, appRangeStatus.resultIsStat ? "RELAXED STAT (UNCAL)" : "SINGLE SHOT (UNCAL)", LCD_COLOR_WHITE);
+  Text(12, 27, AppCapture_Detail()[0] ? AppCapture_Detail() :
+    (appRangeStatus.resultIsStat ? "RELAXED STAT (UNCAL)" : "SINGLE SHOT (UNCAL)"), LCD_COLOR_WHITE);
   if (fresh)
   {
     (void)snprintf(value, sizeof(value), "%lu.%03lu m",

@@ -1,4 +1,5 @@
 #include "app_range.h"
+#include "app_capture.h"
 #include "app_board_config.h"
 #include "app_net.h"
 #include "app_mic_scope.h"
@@ -141,6 +142,18 @@ static void Unlock(void)
   ClearMeasurements();
 }
 
+void AppRange_ResetRound(void)
+{
+  uint32_t mask=__get_PRIMASK();
+  Unlock();
+  memset(&appRangeStatus,0,sizeof(appRangeStatus));
+  memset(&rangeDspDiagnostics,0,sizeof(rangeDspDiagnostics));
+  __disable_irq();readSample=audioCount;seenEpoch=audioEpoch;__set_PRIMASK(mask);
+  haveWindow=0;lastDetection=0;RangeAudioTime_Reset(&audioTime);
+  lastSyncNs=0;lastStateId=0;lastSyncMs=HAL_GetTick()-100U;
+  localIndex=remoteIndex=0;
+}
+
 static void DisplayResult(uint32_t id, uint32_t mm, uint32_t side, uint32_t quality)
 {
   if (id==appRangeStatus.resultId) return; /* Retries never refresh stale results. */
@@ -165,6 +178,7 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
   uint64_t x,y,z,rx=rangeRxTimestamp,tx;
   (void)arg; (void)socket;
   if (!p) return;
+  if(AppCapture_Busy()) { pbuf_free(p);return; }
   if (!appNetStatus.online || port!=APP_RANGE_PORT || !ip_addr_cmp(addr,&peer) ||
       p->tot_len!=WIRE_SIZE || pbuf_copy_partial(p,bytes,WIRE_SIZE,0)!=WIRE_SIZE)
   { pbuf_free(p); ++appRangeStatus.rejected; return; }
@@ -308,7 +322,7 @@ void AppRange_AudioError(void) { ++audioEpoch; }
 
 void AppRange_Audio(const volatile int16_t *pcm, uint32_t frames)
 {
-  uint32_t i;
+  uint32_t i, epoch;
   uint64_t now=RangeClock_Now(), previous=audioAnchor;
   uint64_t base=audioCount;
   if(frames!=APP_AUDIO_HALF_FRAMES) { ++audioEpoch; return; }
@@ -320,6 +334,8 @@ void AppRange_Audio(const volatile int16_t *pcm, uint32_t frames)
     audioRing[(uint32_t)(base+i)&(AUDIO_RING-1)] = value;
   }
   audioCount+=frames; audioAnchor=now; ++audioBlocks;
+  epoch=audioEpoch;
+  AppCapture_Audio(pcm,frames,base+frames,now,epoch);
 }
 
 static void DetectionReady(uint64_t stamp, uint32_t quality)
@@ -328,6 +344,21 @@ static void DetectionReady(uint64_t stamp, uint32_t quality)
   ++appRangeStatus.events;
   appRangeStatus.eventQuality=quality;
   appRangeStatus.eventPeakSpreadSamples=rangeDspPeakSpreadSamples;
+  AppCapture_Trigger();
+  AppCapture_Log("event,%lu,%llu,%lu,%u\n",(unsigned long)appRangeStatus.events,
+    (unsigned long long)stamp,(unsigned long)quality,appRangeStatus.locked);
+  AppCapture_Log("clock,%lu,%llu,%.3f,%.3f,%.12f\n",(unsigned long)appRangeStatus.events,
+    (unsigned long long)(APP_BOARD_ROLE==APP_BOARD_B ? RangeSync_Master(&syncModel,stamp) : stamp),
+    syncModel.origin,syncModel.offset,syncModel.slope);
+#if APP_RANGE_JOINT_PEAKS
+  {
+    unsigned c;
+    for(c=0;c<detectedPeaks.count;++c)
+      AppCapture_Log("candidate,%lu,%u,%ld,%ld,%ld,%lu\n",(unsigned long)appRangeStatus.events,c,
+        (long)detectedPeaks.peak[c].offsetNs[0],(long)detectedPeaks.peak[c].offsetNs[1],
+        (long)detectedPeaks.peak[c].offsetNs[2],(unsigned long)detectedPeaks.peak[c].quality);
+  }
+#endif
   if (!appRangeStatus.locked) { ++appRangeStatus.unlockedEvents; return; }
   if (APP_BOARD_ROLE==APP_BOARD_A)
   {
@@ -456,7 +487,7 @@ int AppRange_DisplayReady(void)
 {
   uint64_t count;
   uint32_t mask;
-  if(!clockReady || !pcb) return 1; /* Keep initialization errors visible. */
+  if(!clockReady || !pcb || AppCapture_Busy()) return 1; /* Keep recorder errors visible. */
   mask=__get_PRIMASK(); __disable_irq();
   count=audioCount;
   __set_PRIMASK(mask);
@@ -502,6 +533,12 @@ static void PairEvents(void)
         RangePairDiag diag;
         int paired=RangePeak_PairDetailed(&localEvents[i].peaks,&remoteEvents[j].peaks,delta,
                                  &delta,&resultQuality,&appRangeStatus.peakPairSpreadNs,&diag);
+        AppCapture_Log("pair,%lu,%lu,%llu,%llu,%d,%u,%ld,%ld,%lu,%lu,%lu,%lu,%u,%u,%u,%u\n",
+          (unsigned long)localEvents[i].id,(unsigned long)remoteEvents[j].id,
+          (unsigned long long)localEvents[i].time,(unsigned long long)remoteEvents[j].time,
+          paired,diag.reason,(long)diag.bestNs,(long)diag.runnerNs,(unsigned long)diag.bestScore,
+          (unsigned long)diag.runnerScore,(unsigned long)diag.bestSpanNs,(unsigned long)diag.runnerSpanNs,
+          diag.bestA,diag.bestB,diag.runnerA,diag.runnerB);
         if(paired!=1) {
           diag.serial=appRangeStatus.pairFailure.serial+1U;
           if(!diag.serial) diag.serial=1;
@@ -579,6 +616,11 @@ void AppRange_Process(void)
 {
   uint32_t now=HAL_GetTick();
   if(!clockReady || !pcb) return;
+  if(AppCapture_Busy()) {
+    uint32_t mask=__get_PRIMASK();
+    __disable_irq();readSample=audioCount;seenEpoch=audioEpoch;__set_PRIMASK(mask);
+    haveWindow=0;return;
+  }
   {
     uint64_t start=RangeClock_Now(), finish, elapsed;
     AudioProcess(); /* Full-rate PCM; never run DSP in the DMA ISR. */

@@ -3,6 +3,9 @@
 #include <string.h>
 #include <math.h>
 #include "../../Core/Src/app_mic_scope.c"
+int AppCapture_Busy(void) { return 0; }
+const char *AppCapture_Text(void) { return "CAP HELD / A USER"; }
+const char *AppCapture_Detail(void) { return "SD W H1 E00000010"; }
 #include "../../../../Utilities/Fonts/font12.c"
 #include "../../../../Utilities/Fonts/font16.c"
 #include "../../../../Utilities/Fonts/font24.c"
