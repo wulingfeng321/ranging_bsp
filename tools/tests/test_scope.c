@@ -37,6 +37,12 @@ int AppRange_RequestPage(AppPage next)
 { if(busy || !settingsReady) return 0; page=next; ++pageEdits; return 1; }
 int AppRange_AdjustTemperature(int32_t step)
 { if(busy || !settingsReady) return 0; temp+=step; ++tempEdits; return 1; }
+uint64_t AppRange_WavePeriodPs(void) { return 2000000000ULL; }
+uint32_t AppRange_WaveCalMs(void) { return 5000; }
+int AppRange_WaveRelock(void) { return !busy; }
+static int waveFail;
+int AppRange_WaveRead(uint64_t at,int16_t *out,unsigned n)
+{ unsigned i; (void)at; for(i=0;i<n;++i) out[i]=(int16_t)(8000*sin(i*10.0*3.141592653589793/(n-1))); return !busy && !waveFail; }
 int AppRange_DisplayReady(void) { return ready; }
 void AppRange_AudioError(void) { ++errors; }
 void AppRange_Audio(const volatile int16_t *pcm,uint32_t n) { (void)pcm; (void)n; }
@@ -153,8 +159,14 @@ int main(int argc,char **argv)
   if(argc>1) Save(argv[1],"diagnostics");
   page=APP_PAGE_CLAP; Draw(HAL_GetTick(),page); assert(strstr(screenText,"DEMO ONLY"));
   if(argc>1) Save(argv[1],"clap");
-  page=APP_PAGE_WAVE; Draw(HAL_GetTick(),page); assert(strstr(screenText,"NOT LIVE AUDIO"));
+  page=APP_PAGE_WAVE; Draw(HAL_GetTick(),page); assert(strstr(screenText,"LOCAL MIC L / LIVE") && strstr(screenText,"TONE LOCK 500.000"));
+  assert(!strstr(screenText,"SAVE:") && !strstr(screenText,"CAP HELD"));
   if(argc>1) Save(argv[1],"wave");
+  waveFail=1; masterClock+=50000000ULL; Draw(HAL_GetTick(),page);
+  assert(strstr(screenText,"P-P:") && !strstr(screenText,"WAITING"));
+  masterClock+=201000000ULL; Draw(HAL_GetTick(),page);
+  assert(strstr(screenText,"WAITING"));
+  waveFail=0; Draw(HAL_GetTick(),page); assert(strstr(screenText,"P-P:"));
   page=APP_PAGE_POSITION; Draw(HAL_GetTick(),page);
   for(i=32*480;i<272*480;++i) assert(((uint32_t *)pixels)[i]==BG);
   if(argc>1) Save(argv[1],"position");

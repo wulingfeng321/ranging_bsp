@@ -7,6 +7,7 @@
 #include "range_sync.h"
 #include "range_pps.h"
 #include "range_audio_time.h"
+#include "range_wave.h"
 #if APP_RANGE_JOINT_PEAKS
 #include "range_peak_pair.h"
 #endif
@@ -37,8 +38,9 @@ static uint64_t batchFirstEventNs, batchLastEventNs;
 #define UI_STATE 12U
 #define UI_REQUEST 13U
 #define UI_ACK 14U
+#define WAVE_CLOCK 15U
 #define AUDIO_RING (APP_AUDIO_SAMPLE_RATE == 48000U ? 32768U : 8192U)
-#define RANGE_WIRE_VERSION (APP_AUDIO_SAMPLE_RATE == 48000U ? 5U : 4U)
+#define RANGE_WIRE_VERSION (APP_AUDIO_SAMPLE_RATE == 48000U ? 7U : 6U)
 extern struct netif gnetif;
 AppRangeStatus appRangeStatus;
 AppRangeArrival appRangeArrival;
@@ -68,6 +70,15 @@ static uint8_t windowTimeReady;
 static RangeAudioTime audioTime;
 static uint32_t timeModelBlock;
 static uint8_t haveWindow;
+static RangeWaveTone waveTone;
+static uint64_t wavePeriodPs,waveOriginNs;
+static uint32_t waveCalMs,waveSendMs,waveSeenEpoch,waveLastBlock,waveClockId;
+static int16_t waveBlock[APP_AUDIO_HALF_FRAMES];
+static void WaveReset(void)
+{
+  RangeWave_Reset(&waveTone); wavePeriodPs=waveOriginNs=0; waveCalMs=0;
+  waveClockId=0; waveSendMs=HAL_GetTick()-250U;
+}
 static uint64_t dspPeriodStart, dspBusyNs;
 
 typedef struct {
@@ -148,7 +159,7 @@ static void ClearMeasurements(void)
 
 static void Unlock(void)
 {
-  syncOriginNs=0;
+  syncOriginNs=0; WaveReset();
   RangePps_Update(NULL,0);
   RangeSync_Reset(&syncModel); appRangeStatus.locked=0;
   pendingRequest=0; haveResponse=0; ++syncEpoch;
@@ -170,7 +181,7 @@ static int RangingEnabled(void)
 static void ApplyUi(AppPage page,int32_t temp)
 {
   uint32_t mask=__get_PRIMASK();
-  uiPage=page; temperature=temp;
+  uiPage=page; temperature=temp; WaveReset();
   ClearMeasurements();
   appRangeStatus.quality=0; appRangeStatus.eventQuality=0;
   appRangeStatus.resultIsStat=0; appRangeStatus.audioTimeReady=0;
@@ -200,6 +211,10 @@ int AppRange_RequestPage(AppPage page)
   if(page==uiPage) return 1;
   return RequestUi(0,(uint32_t)page);
 }
+int AppRange_WaveRelock(void)
+{ return uiPage==APP_PAGE_WAVE ? RequestUi(2,0) : 0; }
+uint64_t AppRange_WavePeriodPs(void) { return wavePeriodPs; }
+uint32_t AppRange_WaveCalMs(void) { return waveCalMs; }
 int AppRange_AdjustTemperature(int32_t stepDeciC)
 {
   int32_t next=temperature+stepDeciC;
@@ -275,12 +290,12 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
     return;
   }
   if(APP_BOARD_ROLE==APP_BOARD_A && type==UI_REQUEST) {
-    if(!id || x>1 || (x==0 && y>APP_PAGE_POSITION) ||
+    if(!id || x>2 || (x==2 && (y || uiPage!=APP_PAGE_WAVE)) || (x==0 && y>APP_PAGE_POSITION) ||
        (x==1 && (y>600 || y%5))) goto reject;
     if(!uiLastRequest || (id!=uiLastRequest && id-uiLastRequest<0x80000000UL)) {
       /* Request values are absolute, so duplicates cannot double-step temperature. */
       uiLastRequest=id;
-      if((x==0 && uiPage!=(AppPage)y) || (x==1 && temperature!=(int32_t)y-100)) {
+      if(x==2 || (x==0 && uiPage!=(AppPage)y) || (x==1 && temperature!=(int32_t)y-100)) {
         ++uiRevision; if(!uiRevision) ++uiRevision;
         ApplyUi(x==0 ? (AppPage)y : uiPage,x==1 ? (int32_t)y-100 : temperature);
       }
@@ -299,6 +314,14 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
     Send(UI_ACK,id,0,0,0,0,0,0);
     return;
   }
+  if(APP_BOARD_ROLE==APP_BOARD_B && type==WAVE_CLOCK) {
+    if(uiPage!=APP_PAGE_WAVE || !AppRange_SettingsReady() || !appRangeStatus.locked ||
+       epoch!=syncEpoch || G32(bytes+72)!=uiRevision || z>5000 ||
+       (x && (x<1666666666ULL || x>2500000000ULL || !y))) goto reject;
+    if(waveClockId && (id==waveClockId || id-waveClockId>=0x80000000UL)) return;
+    waveClockId=id; wavePeriodPs=x; waveOriginNs=y; waveCalMs=(uint32_t)z;
+    return;
+  }
   /* Clock traffic is independent of UI configuration. Every measurement packet
    * carries the setting revision so delayed results cannot cross a page/temp edit. */
   if(type>=EVENT && type<=PEAK_DIAG &&
@@ -315,7 +338,7 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
     {
       if (lastStateId && (id-lastStateId==0 || id-lastStateId>=0x80000000UL)) goto reject;
       lastStateId=id;
-      if (epoch!=peerEpoch || !x) { ClearMeasurements(); syncOriginNs=0; }
+      if (epoch!=peerEpoch || !x) { ClearMeasurements(); syncOriginNs=0; WaveReset(); }
       if(x && !syncOriginNs)
         syncOriginNs=(RangeClock_Now()/1000000000ULL+1U)*1000000000ULL;
       peerEpoch=epoch; appRangeStatus.locked=(uint8_t)x;
@@ -620,6 +643,101 @@ int AppRange_MasterTime(uint64_t *masterNs)
   return 1;
 }
 
+/* Observe audio time even while the ranging detector is paused. The existing
+ * full-rate L ring is shared read-only; stereo capture and DMA remain intact. */
+static void WaveObserve(void)
+{
+  uint64_t count,anchor; uint32_t blocks,epoch,mask,i;
+  mask=__get_PRIMASK(); __disable_irq();
+  count=audioCount; anchor=audioAnchor; blocks=audioBlocks; epoch=audioEpoch;
+  __set_PRIMASK(mask);
+  if(waveSeenEpoch!=epoch) {
+    waveSeenEpoch=epoch; WaveReset(); RangeAudioTime_Reset(&audioTime);
+    appRangeStatus.audioTimeReady=0;
+  }
+  if(blocks==waveLastBlock || !anchor || count<APP_AUDIO_HALF_FRAMES) return;
+  waveLastBlock=blocks;
+  RangeAudioTime_Add(&audioTime,count,anchor);
+  appRangeStatus.audioTimeReady=audioTime.ready;
+  appRangeStatus.audioJitterNs=audioTime.jitterNs;
+  if(audioTime.ready) appRangeStatus.samplePeriodPs=(uint32_t)(audioTime.periodNs*1000.0+0.5);
+  if(APP_BOARD_ROLE!=APP_BOARD_A || wavePeriodPs || !appRangeStatus.locked ||
+     !AppRange_SettingsReady() || !audioTime.ready) return;
+  /* LCD work may span several DMA blocks. Consume retained blocks rather
+   * than treating a missed main-loop observation as missing audio. */
+  {
+    uint64_t end=waveTone.blocks ? waveTone.nextSample+APP_AUDIO_HALF_FRAMES : count;
+    if(end>count || count-end>AUDIO_RING-2U*APP_AUDIO_HALF_FRAMES) {
+      RangeWave_Reset(&waveTone); end=count;
+    }
+    for(;end<=count;end+=APP_AUDIO_HALF_FRAMES) {
+      uint64_t stamp=anchor-(uint64_t)((count-end)*audioTime.periodNs);
+      for(i=0;i<APP_AUDIO_HALF_FRAMES;++i)
+        waveBlock[i]=audioRing[(uint32_t)(end-APP_AUDIO_HALF_FRAMES+i)&(AUDIO_RING-1)];
+      __DMB();
+      if(epoch!=audioEpoch || audioCount-(end-APP_AUDIO_HALF_FRAMES)>=AUDIO_RING) {
+        RangeWave_Reset(&waveTone); return;
+      }
+      RangeWave_Add(&waveTone,waveBlock,APP_AUDIO_HALF_FRAMES,end,stamp);
+    }
+  }
+  waveCalMs=waveTone.blocks ? (uint32_t)((anchor-waveTone.baseNs)/1000000ULL) : 0;
+  if(waveCalMs>5000) waveCalMs=5000;
+  if(waveTone.periodPs) {
+    wavePeriodPs=waveTone.periodPs;
+    waveOriginNs=(RangeClock_Now()/1000000000ULL+1U)*1000000000ULL;
+    AppCapture_Log("wave_clock,%llu,%llu\n",(unsigned long long)wavePeriodPs,
+      (unsigned long long)waveOriginNs);
+    waveSendMs=HAL_GetTick()-250U;
+  }
+}
+int AppRange_WaveRead(uint64_t presentMasterNs,int16_t *out,unsigned points)
+{
+  uint64_t count,start,anchorSample,masterNow; uint32_t epoch,mask,i;
+  double anchor,period,first,last;
+  int synced=presentMasterNs!=0;
+  if(!out || points<2 || points>480 || uiPage!=APP_PAGE_WAVE ||
+     !audioTime.ready || AppCapture_Busy()) return 0;
+  if(synced && !AppRange_MasterTime(&masterNow)) return 0;
+  mask=__get_PRIMASK(); __disable_irq();
+  count=audioCount; epoch=audioEpoch;
+  __set_PRIMASK(mask);
+  if(epoch!=waveSeenEpoch || !audioTime.count) return 0;
+  anchorSample=audioTime.sample[(audioTime.next+31U)%32U];
+  anchor=audioTime.anchorNs; period=audioTime.periodNs;
+  if(synced && APP_BOARD_ROLE==APP_BOARD_B) {
+    anchor=anchor-syncModel.offset-syncModel.slope*(anchor-syncModel.origin);
+    period*=1.0-syncModel.slope;
+  }
+  start=RangeWave_Start(synced ? presentMasterNs : RangeClock_Now(),
+                       synced ? waveOriginNs : 0,synced ? wavePeriodPs : 0);
+  first=(double)anchorSample+((double)start-anchor)/period;
+  last=first+10000000.0/period;
+  if(first<0 || last+1>=(double)count || (double)count-first>AUDIO_RING-APP_AUDIO_HALF_FRAMES) return 0;
+  {
+    /* Keep the large absolute sample index integer; the F746 has a single
+     * precision FPU. Per-pixel double divisions used to span DMA callbacks. */
+    uint64_t base=(uint64_t)first;
+    float fraction0=(float)(first-(double)base);
+    float step=(float)((last-first)/(points-1U));
+    for(i=0;i<points;++i) {
+      float at=fraction0+step*i;
+      uint32_t relative=(uint32_t)at;
+      uint64_t index=base+relative;
+      float fraction=at-relative;
+      int32_t a=audioRing[(uint32_t)index&(AUDIO_RING-1)];
+      int32_t b=audioRing[(uint32_t)(index+1U)&(AUDIO_RING-1)];
+      float value=a+(b-a)*fraction;
+      out[i]=(int16_t)(value>=0 ? value+0.5f : value-0.5f);
+    }
+    __DMB();
+    mask=__get_PRIMASK(); __disable_irq();
+    count=audioCount; __set_PRIMASK(mask);
+    /* New DMA data does not invalidate an untouched historical window. */
+    return epoch==audioEpoch && count-base<AUDIO_RING;
+  }
+}
+
 int AppRange_DisplayReady(void)
 {
   uint64_t count;
@@ -763,6 +881,7 @@ void AppRange_Process(void)
     if(RangingEnabled()) AudioProcess(); /* Never run DSP in the DMA ISR. */
     else {
       uint32_t mask=__get_PRIMASK();
+      if(uiPage==APP_PAGE_WAVE) WaveObserve();
       __disable_irq(); readSample=audioCount; seenEpoch=audioEpoch; __set_PRIMASK(mask);
       haveWindow=0; lastDetection=0;
     }
@@ -794,6 +913,11 @@ void AppRange_Process(void)
     return;
   }
   UiProcess(now);
+  if(APP_BOARD_ROLE==APP_BOARD_A && uiPage==APP_PAGE_WAVE && appRangeStatus.locked &&
+     AppRange_SettingsReady() && now-waveSendMs>=250U) {
+    waveSendMs=now;
+    Send(WAVE_CLOCK,++sequence,peerEpoch,wavePeriodPs,waveOriginNs,waveCalMs,0,0);
+  }
   if(APP_BOARD_ROLE==APP_BOARD_B)
   {
     if(lastSyncNs && RangeClock_Now()-lastSyncNs>1500000000ULL)

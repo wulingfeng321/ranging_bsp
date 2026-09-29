@@ -8,7 +8,8 @@
 #include "stm32746g_discovery_lcd.h"
 #include "stm32746g_discovery_ts.h"
 #include <stdio.h>
-#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define FRAME_A 0xC0000000U
 #define FRAME_B 0xC0080000U
@@ -213,23 +214,54 @@ static void ClapDemo(void)
   Text(12,223,"Ranging paused; clock sync and audio recording remain.",MUTED);
   Footer();
 }
-static void WaveDemo(void)
+static void WaveLive(void)
 {
-  unsigned x,c; Common(); Font(&Font12);
-  Text(12,76,"DEMO WAVE / NOT LIVE AUDIO / RANGING PAUSED",WARN);
-  for(c=0;c<2;++c) {
-    int center=133+(int)c*69;
-    Text(12,(uint16_t)(center-32),c ? "LOCAL R (DEMO)" : "LOCAL L (DEMO)",MUTED);
-    BSP_LCD_SetTextColor(PANEL);
-    for(x=12;x<468;x+=38) BSP_LCD_DrawVLine((uint16_t)x,(uint16_t)(center-18),37);
-    BSP_LCD_DrawHLine(12,(uint16_t)center,456);
-    for(x=12;x<468;++x) {
-      int y=center-(int)(16.0f*sinf((float)(x-12)*0.075f));
-      BSP_LCD_DrawPixel((uint16_t)x,(uint16_t)y,c ? ACCENT : GOOD);
+  static int16_t trace[456],candidate[456];
+  static uint32_t lastGood;
+  static int valid;
+  uint64_t ps=AppRange_WavePeriodPs();
+  uint32_t mhz=ps ? (uint32_t)(1000000000000000ULL/ps) : 0;
+  unsigned x; int32_t lo=32767,hi=-32768,sum=0,mean,scale=512,previous=160;
+  int fresh=started && AppRange_WaveRead(presentAt,candidate,456);
+  int have;
+  if(fresh) { memcpy(trace,candidate,sizeof(trace)); lastGood=HAL_GetTick(); valid=1; }
+  if(!started || HAL_GetTick()-lastGood>200U) valid=0;
+  have=valid;
+  char line[80];
+  Common(); Font(&Font12);
+  Text(12,76,"LOCAL MIC L / LIVE / 10ms / RANGE OFF",ACCENT);
+  if(ps) (void)snprintf(line,sizeof(line),"TONE LOCK %lu.%03lu Hz / AUTO GAIN",
+    (unsigned long)(mhz/1000),(unsigned long)(mhz%1000));
+  else (void)snprintf(line,sizeof(line),"500Hz CAL %lu/5s / KEEP SOURCE + BOARDS STILL",
+    (unsigned long)(AppRange_WaveCalMs()/1000U));
+  Text(12,93,line,ps ? GOOD : WARN);
+  BSP_LCD_SetTextColor(PANEL);
+  for(x=12;x<=468;x+=45) BSP_LCD_DrawVLine((uint16_t)x,114,93);
+  for(x=116;x<=204;x+=22) BSP_LCD_DrawHLine(12,(uint16_t)x,456);
+  if(have) {
+    for(x=0;x<456;++x) {
+      int32_t v=trace[x]; sum+=v; if(v<lo) lo=v; if(v>hi) hi=v;
     }
-  }
-  Text(12,229,"Shared refresh target: 20 Hz (hardware check pending)",MUTED);
-  Footer();
+    mean=sum/456;
+    if(hi-mean>scale) scale=hi-mean;
+    if(mean-lo>scale) scale=mean-lo;
+    BSP_LCD_SetTextColor(lo<=-32700 || hi>=32700 ? BAD : GOOD);
+    for(x=0;x<456;++x) {
+      int32_t y=160-(trace[x]-mean)*43/scale;
+      int32_t top;
+      if(!x) previous=y;
+      top=y<previous ? y : previous;
+      BSP_LCD_DrawVLine((uint16_t)(x+12),(uint16_t)top,(uint16_t)(abs(y-previous)+1));
+      previous=y;
+    }
+    (void)snprintf(line,sizeof(line),"P-P:%ld %s",(long)(hi-lo),
+      lo<=-32700 || hi>=32700 ? "CLIPPING" : (hi-lo<256 ? "LOW SIGNAL" : "PCM"));
+    Text(12,213,line,hi-lo<256 ? WARN : MUTED);
+  } else Text(12,153,AppCapture_Busy() ? "SAVING / WAVE PAUSED" :
+    (!started ? "MIC ERROR" : "WAITING FOR AUDIO TIME / FRAME"),WARN);
+  Button(338,211,130,26,"RELOCK TONE",AppRange_SettingsReady() && !AppCapture_Busy());
+  Text(12,241,"LIVE VIEW / 20Hz TARGET / 10ms WINDOW",MUTED);
+  Text(12,257,audioStatus,MUTED);
 }
 static void Draw(uint32_t now,AppPage page)
 {
@@ -237,7 +269,7 @@ static void Draw(uint32_t now,AppPage page)
   switch(page) {
     case APP_PAGE_STANDARD: if(diagnostics) Diagnostics(); else Standard(now); break;
     case APP_PAGE_CLAP: ClapDemo(); break;
-    case APP_PAGE_WAVE: WaveDemo(); break;
+    case APP_PAGE_WAVE: WaveLive(); break;
     default: break; /* Reserved positioning page is intentionally blank. */
   }
 }
@@ -245,6 +277,7 @@ static int Hit(uint16_t x,uint16_t y)
 {
   if(x>=480 || y>=272) return 0;
   if(y<32) return 1+x/120;
+  if(AppRange_Page()==APP_PAGE_WAVE) return x>=338 && y>=211 && y<237 ? 9 : 0;
   if(AppRange_Page()!=APP_PAGE_STANDARD) return 0;
   if(diagnostics) return x>=356 && y>=241 ? 8 : 0;
   if(x>=382 && y>=122 && y<144) return 7;
@@ -277,6 +310,7 @@ static void Touch(uint32_t now)
   touchHeld=1;
   if(hit<=4) (void)AppRange_RequestPage((AppPage)(hit-1));
   else if(hit==5 || hit==6) (void)AppRange_AdjustTemperature(hit==5 ? -5 : 5);
+  else if(hit==9) { (void)AppRange_WaveRelock(); dirty=1; }
   else { diagnostics=(uint8_t)(hit==7); dirty=1; }
 }
 static void StoreHalf(uint32_t offset)

@@ -47,6 +47,13 @@ int AppRange_AdjustTemperature(int32_t stepDeciC);
 /* Common counter starts at an A-clock second boundary after lock; zero while
  * unlocked or awaiting the common origin. Local clock never resets. */
 int AppRange_SyncElapsed(uint64_t *elapsedUs, uint64_t *localUs);
+/* Main loop: copies 10 ms of the local L PCM onto uniformly spaced common
+ * timestamps. Caller owns out; returns 0 on warm-up/gap/stale window/race.
+ * presentMasterNs=0 uses an unsynchronized local-clock window. */
+int AppRange_WaveRead(uint64_t presentMasterNs,int16_t *out,unsigned points);
+uint64_t AppRange_WavePeriodPs(void);
+uint32_t AppRange_WaveCalMs(void);
+int AppRange_WaveRelock(void);
 void AppRange_Init(void);
 void AppRange_Process(void);
 /* Recorder transaction only: clears round counters and restarts synchronization. */

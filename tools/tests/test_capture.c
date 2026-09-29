@@ -13,6 +13,8 @@ char SDPath[4];
 FATFS SDFatFS;
 const Diskio_drvTypeDef CaptureSD_Driver=0;
 const char *CaptureSD_ErrorText(void) { return "SD W H1 E00000010"; }
+static AppPage testPage=APP_PAGE_STANDARD;
+AppPage AppRange_Page(void) { return testPage; }
 static uint32_t tick=10000,button,resets,shortWrite,closeFailure,completeClosed,dropMask;
 static uint32_t tickAdvance;
 static struct udp_pcb fakeSocket;
@@ -117,6 +119,12 @@ int main(int argc,char **argv)
         f=fopen(path,"wb");assert(f);assert(fwrite(files[i],1,sizes[i],f)==sizes[i]);fclose(f);
       }
     }
+    testPage=APP_PAGE_WAVE;
+    button=1;AppCapture_Process();tick+=41;AppCapture_Process();
+    appCaptureSaveRequest=APP_CAPTURE_SAVE_REQUEST;AppCapture_Process();
+    assert(state==IDLE && !hold && !appCaptureSaveRequest);
+    testPage=APP_PAGE_STANDARD;AppCapture_Process();assert(state==IDLE);
+    button=0;AppCapture_Process();tick+=41;AppCapture_Process();
     button=1;AppCapture_Process();tick+=20;button=0;AppCapture_Process();tick+=50;AppCapture_Process();
     assert(state==IDLE && !hold); /* contact bounce does not trigger save */
     /* Real hardware ticks during Seal/StartSave. A cached pre-button tick must
