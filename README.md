@@ -1,5 +1,19 @@
 # ranging_bsp · 双开发板声学测距
 
+## 开发分支与回波实验归档（2026-09-29）
+
+后续UI优化与其他功能开发使用 **`codex/ui-features`**，固件基线为
+`547e91404b05d1d6b35dd3d1333857cf449d23a8`。该分支仅同步最新README与
+[early1回波处理报告](EARLY1_ECHO_REPORT.md)，不引入early1检测器或DSP优化设置。
+
+early1代码、工具及分析资料保存在 **`codex/echo-early1`**，代码提交为
+`b33a16a4a98b42edcb5c9c96f09934b2c3561880`。该版在新190 cm实测中暴露了候选门限、
+粗筛相位及连续处理负载问题，目前作为早期尝试归档。
+**回波处理暂停，待回到实验室，在验收环境测试基线后再评估是否继续。**
+
+切分支不会改变已烧录固件；两板最后烧录的是early1。若需要测试基线，应从当前分支重新编译、
+烧录，避免使用编译目录中遗留的early1产物。下面保留既有功能说明及历史实验记录。
+
 ## 同步整帧显示（2026-09-26）
 
 统计有效距离已扩展为 **100～2000 mm（含边界）**，通过 `app_board_config.h` 中的
@@ -23,7 +37,7 @@
 
 ## 48 kHz 分支（2026-09-26）
 
-当前分支 `feat/audio-48khz` 从 16 kHz 基线提交 `464cb35` 创建，默认采样率为 48 kHz，
+48 kHz实现最初在 `feat/audio-48khz` 分支从16 kHz基线提交 `464cb35` 创建，默认采样率为48 kHz，
 仍选择 LEGACY / JOINT2、2–6 kHz 测试音频。两板应使用带 `_48000Hz` 后缀的固件，
 播放 [48 kHz 测试音频](tools/test_audio_chirp_48k_repeat.wav)（10.5 s 内容 + 5 s 静默）。
 
@@ -375,3 +389,23 @@ capture4修正SD DMA为`DMA_PFCTRL`，与Discovery官方BSP一致：capture3在�
 无RTC日期设置，文件系统日期固定为2026-09-28，目录序号与记录内部时间用于识别轮次。不要用文件时间推算声传播时间。
 
 验证命令：`tools/tests/run_capture_tests.ps1`、`tools/tests/run_host_tests.ps1`、`tools/tests/run_scope_tests.ps1`。录制测试覆盖环形回绕、自动冻结、传输数据一致性、丢包重试、损坏包/旧事务拒绝、写入/关闭失败保留、清零顺序及按键消抖；真实SD卡按键保存仍需实机完成一轮核验。
+
+### 已归档：2026-09-29有界早到选峰实验（early1）
+
+**以下仅描述`codex/echo-early1`分支。`codex/ui-features`已恢复`547e914`算法，
+本节的实验脚本和宏不属于该分支当前代码。实验结果与未来计划见根目录报告。**
+
+48 kHz、LEGACY、联合三脉冲模式默认启用 `APP_RANGE_EARLY`。粗筛平方相关门限为0.04；在首次粗筛附近向前4 ms、向后12 ms搜索，三个脉冲各自质量至少0.30、位置跨度不超过3个采样点。合并0.4 ms内的旁峰后，在质量不低于最强候选65%的候选中选择最早者。去掉旧的间隙能量否决，避免混响填满间隙时漏检。送往配对层的是选出的一个三脉冲候选，单次预览及2 m统计范围保留。较弱直达声仍可能未达门限，不能保证每次预览正确。
+
+实现使用约17.1 KB静态工作区，每次主循环最多计算16个位置，继续服务网络；不需要录完整段后才分析。整数64位累加防溢出，M7使用双16位乘累加指令。**IAR工程中 `range_dsp.c` 单文件必须保留 High/Speed 优化**；CubeMX重新生成后须检查此项，低优化版本无法满足处理速度。其他源文件保持原优化级别。设置 `APP_RANGE_EARLY=0` 可回退旧检测器，必须将两板编译为一致配置。
+
+复现 C 回放与连续处理测试：
+
+```powershell
+./tools/tests/run_early_tests.ps1 -Captures 'C:/Users/hhcch/Desktop/SD_capture_verified/2026-09-29_50cm_source'
+./tools/build_range_profiles.ps1 -Profiles legacy -JointPeaks
+```
+
+`run_host_tests.ps1` 继续覆盖旧16/48 kHz检测器；新算法由 `run_early_tests.ps1` 覆盖。板上计时可用 `tools/tests/bench_early_board.py`，需pyOCD及新固件符号表：它经调试器上传单个录音窗口到空闲SDRAM、请求有界处理并清空测量轮次，不播放声音、不写SD。该计时只验证计算和调度片段，完整声学测试仍使用扬声器和用户按键。
+
+新采集文件固件标识为 `547e914+early1`。建议先保持B侧、近端50 cm、双屏遮挡、无抱枕，在190 cm复测3轮，再150/170 cm各3轮；等待 `SYNC READY` 且 `AT:OK` 后播放原10.5+5秒音频，`CAP HELD` 后按A板用户键保存。提交完整R目录和每轮真实距离/遮挡情况；不要只保存出结果的轮次。
