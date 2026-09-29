@@ -142,7 +142,7 @@ static void Seal(void)
   sealedPeer=AppNet_PeerSession();
   memset(HEADER,0,HEADER_SIZE);
   (void)snprintf(HEADER,HEADER_SIZE,
-    "{\"format\":\"RNG1\",\"firmware_base\":\"dd73c22+capture4\",\"board\":\"%s\","
+    "{\"format\":\"RNG1\",\"firmware_base\":\"547e914+early1\",\"board\":\"%s\","
     "\"rate\":%lu,\"channels\":2,\"sample_bytes\":2,\"frames\":%lu,\"header_bytes\":4096,"
     "\"anchor_count\":%lu,\"anchor_bytes\":24,\"log_bytes\":%lu,\"log_overflow\":%lu,"
     "\"triggered\":%lu,\"temperature_deci_c\":%d,\"profile\":%d,\"joint\":%d,"

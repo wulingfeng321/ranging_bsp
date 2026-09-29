@@ -102,6 +102,16 @@ int main(void)
     int16_t pcm[APP_AUDIO_HALF_FRAMES*2]; uint32_t before=appRangeStatus.events;
     ClearMeasurements(); appRangeStatus.locked=1;
     assert(!appRangeStatus.pairFailure.serial);
+#if APP_RANGE_EARLY
+    /* Measurements require the audio clock model to settle before playback.
+     * Earlier detection legitimately reaches the first window before warm-up. */
+    memset(pcm,0,sizeof(pcm));
+    for(i=0;i<16;++i) {
+      clockNs=20000000000ULL-(15-i)*16000000ULL;
+      AppRange_Audio(pcm,APP_AUDIO_HALF_FRAMES);
+      for(k=0;k<8;++k)AudioProcess();
+    }
+#endif
     for(i=0;i<24576*APP_AUDIO_SCALE;i+=APP_AUDIO_HALF_FRAMES) {
       for(k=0;k<APP_AUDIO_HALF_FRAMES;++k) {
         int at=(int)((i+k)%(APP_AUDIO_SAMPLE_RATE/2))-129*APP_AUDIO_SCALE; int16_t v=0;
@@ -111,8 +121,27 @@ int main(void)
         pcm[2*k]=v; pcm[2*k+1]=0;
       }
       clockNs=20000000000ULL+(uint64_t)(i+APP_AUDIO_HALF_FRAMES)*1000000000ULL/APP_AUDIO_SAMPLE_RATE;
-      AppRange_Audio(pcm,APP_AUDIO_HALF_FRAMES); for(k=0;k<4;++k) AudioProcess();
+      AppRange_Audio(pcm,APP_AUDIO_HALF_FRAMES);
+#if APP_RANGE_EARLY
+      /* Model the measured ~5 ms fine slices and cheap catch-up scans.
+       * Main loop may drain old windows between DMA blocks; a fixed four
+       * calls/block would artificially prohibit any catch-up after a burst. */
+      {
+        extern uint64_t rangeDspMacs;
+        unsigned budget=0;
+        while(budget<11000 && audioCount-readSample>=RANGE_WINDOW_SAMPLES) {
+          uint64_t beforeMacs=rangeDspMacs;
+          AudioProcess();budget+=rangeDspMacs-beforeMacs>=70000 ? 5100:500;
+        }
+      }
+#else
+      for(k=0;k<4;++k) AudioProcess();
+#endif
     }
+    if(appRangeStatus.events-before!=3 || appRangeStatus.audioDrops || !appRangeStatus.peakCandidates)
+      fprintf(stderr,"stream events=%u drops=%u gaps=%u overruns=%u candidates=%u backlog=%u timing=%u\n",
+        appRangeStatus.events-before,appRangeStatus.audioDrops,appRangeStatus.audioGapDrops,
+        appRangeStatus.audioOverruns,appRangeStatus.peakCandidates,appRangeStatus.backlogSamples,appRangeStatus.audioTimingRejected);
     assert(appRangeStatus.events-before==3 && appRangeStatus.audioDrops==0 && appRangeStatus.peakCandidates>0);
     AppRange_AudioError(); AudioProcess();
     assert(!appRangeStatus.valid && !pendingEventId && !appRangeStatus.peakUncertain);

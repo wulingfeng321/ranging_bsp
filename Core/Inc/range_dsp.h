@@ -31,10 +31,12 @@ void RangeDsp_Candidates(const int16_t *x, float position, RangeDspPeaks *peaks)
 /* Last accepted signature: local per-pulse peak spread, in sample units.
  * Diagnostic only; it does not establish a direct acoustic path. */
 extern uint32_t rangeDspPeakSpreadSamples;
-/* Local LEGACY diagnostics, main loop only, retained until reboot. Counts are
+/* Local LEGACY diagnostics, main loop only, retained until round reset. Counts are
  * search attempts, NOT transmitted signatures. Each coarse pass ends in one
  * of failPulse[0..2], gapRejected or signatures. Maxima are independent and
- * reuse evaluated correlations (later pulses are short-circuit gated). */
+ * reuse evaluated correlations (later pulses are short-circuit gated).
+ * EARLY mode searches all three pulses and ends in signatures/noCandidates;
+ * failPulse and gap fields belong to the old detector and stay zero. */
 typedef struct {
   uint32_t coarsePassed, failPulse[3], gapRejected, signatures;
   uint32_t noCandidates, candidateOverflow;
@@ -42,8 +44,11 @@ typedef struct {
   uint8_t haveGap;
 } RangeDspDiagnostics;
 extern RangeDspDiagnostics rangeDspDiagnostics;
-/* Search [first, end) template-start positions, at most RANGE_SCAN_SLICE starts per call.
- * Returns a fractional sample position; polarity invariant correlation. */
+/* Search [first, end) for a trigger. Returns 0 for no signature, 1 for a
+ * fractional sample position; polarity invariant correlation. EARLY mode
+ * expands around the trigger: -1 means bounded work pending; call again with
+ * the same window and slice. Reset before processing each new/discarded window. */
+void RangeDsp_Reset(void);
 int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
                   float *position, uint32_t *quality);
 /* Delta is corrected B-A arrival time, ns; temperature in 0.1 deg C.

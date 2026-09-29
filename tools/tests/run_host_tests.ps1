@@ -7,7 +7,7 @@ $out = Join-Path ([IO.Path]::GetTempPath()) 'ranging-host-tests'
 [void][IO.Directory]::CreateDirectory($out)
 if (!(Test-Path -LiteralPath $VcVars)) { throw "Pass -VcVars with your MSVC vcvars64.bat path" }
 $commands = @('@echo off', "call `"$VcVars`" >nul", "cd /d `"$root`"")
-$common = "/nologo /utf-8 /O2 /Itools/tests/net_stubs /ICore/Inc /Fo`"$out/`""
+$common = "/nologo /utf-8 /O2 /DAPP_RANGE_EARLY=0 /Itools/tests/net_stubs /ICore/Inc /Fo`"$out/`""
 foreach ($rate in 16000,48000) {
     $commands += "cl $common /LD /DAPP_AUDIO_SAMPLE_RATE=$rate /DAPP_RANGE_AUDIO_PROFILE=1 /DAPP_RANGE_JOINT_PEAKS=1 /DRANGE_DSP_PROFILE Core/Src/range_dsp.c tools/tests/peak_pair_host.c /link /OUT:`"$out/joint$rate.dll`" /IMPLIB:`"$out/joint$rate.lib`" /EXPORT:RangeDsp_Find /EXPORT:RangeDsp_Candidates /EXPORT:Test_Pair /EXPORT:Test_Pack /EXPORT:Test_Unpack /EXPORT:Test_SampleRate /EXPORT:Test_MacCount"
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'

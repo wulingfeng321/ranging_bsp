@@ -15,6 +15,9 @@
 #include "app_board_config.h"
 #include <math.h>
 #include <string.h>
+#if APP_RANGE_EARLY && defined(__ICCARM__)
+#include "cmsis_compiler.h"
+#endif
 typedef char TemplateLengthCheck[(sizeof(rangeUp)/sizeof(rangeUp[0]) == RANGE_PULSE_SAMPLES) ? 1 : -1];
 uint32_t rangeDspPeakSpreadSamples;
 RangeDspDiagnostics rangeDspDiagnostics;
@@ -35,11 +38,31 @@ static float Score(const int16_t *x, const int16_t *tpl)
   unsigned i;
   float dot = 0, xx = 0, sum = 0;
   COUNT_MACS(RANGE_PULSE_SAMPLES);
+#if APP_RANGE_EARLY
+  /* Exact 64-bit accumulation prevents Q15 overflow. Cortex-M7 performs two
+   * signed products per SMLALD; host fallback has identical integer sums. */
+  int64_t d=0,e=0;int32_t s=0;
+  for(i=0;i<RANGE_PULSE_SAMPLES;i+=2) {
+#if defined(__ICCARM__)
+    uint32_t a=__UNALIGNED_UINT32_READ(x+i);
+    uint32_t b=__UNALIGNED_UINT32_READ(tpl+i);
+    d=(int64_t)__SMLALD(a,b,(uint64_t)d);
+    e=(int64_t)__SMLALD(a,a,(uint64_t)e);
+    s+=(int16_t)a+(int16_t)(a>>16);
+#else
+    int32_t a=x[i],b=x[i+1];
+    d+=(int64_t)a*tpl[i]+(int64_t)b*tpl[i+1];
+    e+=(int64_t)a*a+(int64_t)b*b;s+=a+b;
+#endif
+  }
+  dot=(float)d;xx=(float)e;sum=(float)s;
+#else
   for (i = 0; i < RANGE_PULSE_SAMPLES; ++i)
   {
     float v = x[i];
     dot += v * tpl[i]; xx += v * v; sum += v;
   }
+#endif
   xx -= sum * sum / (float)RANGE_PULSE_SAMPLES;
   if (xx < (float)RANGE_PULSE_SAMPLES * APP_RANGE_MIN_RMS * APP_RANGE_MIN_RMS) return 0;
   /* Templates are generated DC-removed and have separately measured energy. */
@@ -55,9 +78,17 @@ static float CoarseScore(const int16_t *x)
   unsigned i;
   float dot=0,xx=0,sum=0;
   COUNT_MACS(512);
+#if APP_RANGE_EARLY
+  int64_t d=0,e=0;int32_t s=0;
+  for(i=0;i<RANGE_PULSE_SAMPLES;i+=APP_AUDIO_SCALE) {
+    int32_t a=x[i];d+=(int64_t)a*rangeUp[i];e+=(int64_t)a*a;s+=a;
+  }
+  dot=(float)d;xx=(float)e;sum=(float)s;
+#else
   for(i=0;i<RANGE_PULSE_SAMPLES;i+=APP_AUDIO_SCALE) {
     float v=x[i]; dot+=v*rangeUp[i]; xx+=v*v; sum+=v;
   }
+#endif
   xx-=sum*sum/512.0f;
   if(xx<512.0f*APP_RANGE_MIN_RMS*APP_RANGE_MIN_RMS) return 0;
   return dot*dot/(xx*RANGE_UP_COARSE_ENERGY);
@@ -66,17 +97,28 @@ static float CoarseScore(const int16_t *x)
 #endif
 }
 
+#if APP_RANGE_EARLY
+#include "range_early.h"
+#else
+void RangeDsp_Reset(void) {}
+#endif
+
 #if APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_LEGACY
+#if !APP_RANGE_EARLY
 static float Energy(const int16_t *x, unsigned n)
 {
   unsigned i; float e = 0, s = 0;
   for (i = 0; i < n; ++i) { float v = x[i]; e += v*v; s += v; }
   return (e - s*s/n) / n;
 }
+#endif
 
 int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
                   float *position, uint32_t *quality)
 {
+#if APP_RANGE_EARLY
+  return EarlyFind(x,first,end,position,quality);
+#else
   unsigned k, j, best;
   float v, peak, down, up2, left, right, shift, q, joint, bestJoint;
   if (end > RANGE_WINDOW_SAMPLES - RANGE_SIGNATURE_SAMPLES + 1U)
@@ -170,6 +212,7 @@ int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
     return 1;
   }
   return 0;
+#endif
 }
 
 #else
@@ -252,6 +295,11 @@ int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
 
 void RangeDsp_Candidates(const int16_t *x,float position,RangeDspPeaks *out)
 {
+#if APP_RANGE_EARLY
+  (void)x;(void)position;
+  memset(out,0,sizeof(*out));
+  if(earlyValid) { out->peak[0]=earlySelected;out->count=1; }
+#else
   float score[CANDIDATE_POINTS][3],joint[CANDIDATE_POINTS],strongest=0;
   RangeDspPeak candidates[CANDIDATE_POINTS];
   unsigned center=(unsigned)(position+0.5f),lo,hi,k,p,n=0,i,j;
@@ -315,6 +363,7 @@ void RangeDsp_Candidates(const int16_t *x,float position,RangeDspPeaks *out)
     out->overflow=1;
   if(!out->count) ++rangeDspDiagnostics.noCandidates;
   if(out->overflow) ++rangeDspDiagnostics.candidateOverflow;
+#endif
 }
 
 int RangeDsp_Distance(int64_t deltaNs, int32_t temperatureDeciC,

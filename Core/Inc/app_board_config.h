@@ -57,6 +57,9 @@
 #error Invalid APP_RANGE_AUDIO_PROFILE
 #endif
 /* Experimental early-path detector: squared normalized correlation gates. */
+#ifndef APP_RANGE_EARLY
+#define APP_RANGE_EARLY (APP_AUDIO_SAMPLE_RATE == 48000U && APP_RANGE_JOINT_PEAKS && APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_LEGACY)
+#endif
 #define APP_RANGE_WIDE_SCORE 0.12f
 #define APP_RANGE_WIDE_RELATIVE 0.25f
 #define APP_RANGE_WIDE_LOOKAHEAD 32U /* 2 ms; not a guarantee of a direct path */

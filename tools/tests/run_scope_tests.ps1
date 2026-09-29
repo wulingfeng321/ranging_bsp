@@ -6,7 +6,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $out = Join-Path ([IO.Path]::GetTempPath()) 'ranging-host-tests'
 [void][IO.Directory]::CreateDirectory($out)
 $commands = @('@echo off', "call `"$VcVars`" >nul", "cd /d `"$root`"")
-$commands += "cl /nologo /utf-8 /O2 /DAPP_AUDIO_SAMPLE_RATE=48000 /DAPP_RANGE_AUDIO_PROFILE=1 /DAPP_RANGE_JOINT_PEAKS=1 /ICore/Inc /Fo`"$out/`" tools/tests/test_dsp_diagnostics.c /Fe`"$out/dsp-diagnostics.exe`""
+$commands += "cl /nologo /utf-8 /O2 /DAPP_RANGE_EARLY=0 /DAPP_AUDIO_SAMPLE_RATE=48000 /DAPP_RANGE_AUDIO_PROFILE=1 /DAPP_RANGE_JOINT_PEAKS=1 /ICore/Inc /Fo`"$out/`" tools/tests/test_dsp_diagnostics.c /Fe`"$out/dsp-diagnostics.exe`""
 $commands += 'if errorlevel 1 exit /b 1'
 $commands += "`"$out/dsp-diagnostics.exe`""
 $commands += 'if errorlevel 1 exit /b 1'

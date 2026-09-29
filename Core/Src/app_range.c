@@ -396,6 +396,7 @@ static void AudioProcess(void)
 {
   uint64_t count,anchor;
   uint32_t epoch,blocks,mask,i,q;
+  int found=0;
   float position;
   mask=__get_PRIMASK(); __disable_irq();
   count=audioCount; anchor=audioAnchor; epoch=audioEpoch; blocks=audioBlocks;
@@ -435,10 +436,12 @@ static void AudioProcess(void)
     windowSampleNs=sampleNs;
     for(i=0;i<RANGE_WINDOW_SAMPLES;++i)
       window[i]=audioRing[(uint32_t)(readSample+i)&(AUDIO_RING-1)];
-    scan=0; haveWindow=1;
+    scan=0; haveWindow=1;RangeDsp_Reset();
   }
-  if ((!lastDetection || windowBase+scan>lastDetection+RANGE_REFRACTORY_SAMPLES) &&
-      RangeDsp_Find(window,scan,scan+RANGE_SCAN_SLICE,&position,&q))
+  if (!lastDetection || windowBase+scan>lastDetection+RANGE_REFRACTORY_SAMPLES)
+    found=RangeDsp_Find(window,scan,scan+RANGE_SCAN_SLICE,&position,&q);
+  if(found<0)return; /* Keep the window frozen while bounded fine work completes. */
+  if(found>0)
   {
     uint64_t detected=windowBase+(uint64_t)position;
     double age=((double)(windowAnchorCount-windowBase)-position)*windowSampleNs;
@@ -612,10 +615,46 @@ void AppRange_Init(void)
   udp_recv(pcb,Receive,NULL);
 }
 
+#if APP_RANGE_EARLY
+/* Debug-only on-board timing request. Host uploads ONE PCM window to unused
+ * SDRAM 0xC0600000, then writes magic. Never produces measurement events or SD
+ * files. One bounded DSP call per loop; reset normal ranging on completion. */
+volatile struct {
+  uint32_t request,status,calls,maxUs,totalUs,found,quality,positionQ16;
+} rangeDspBench;
+static uint32_t benchScan;
+static int BenchProcess(void)
+{
+  uint64_t start,elapsed;float pos=0;uint32_t q=0;int result;
+  if(rangeDspBench.request==0x42534D31U && !AppCapture_Busy()) {
+    rangeDspBench.request=0;rangeDspBench.status=1;rangeDspBench.calls=0;
+    rangeDspBench.maxUs=0;rangeDspBench.totalUs=0;rangeDspBench.found=0;
+    rangeDspBench.quality=0;rangeDspBench.positionQ16=0;benchScan=0;
+    memcpy(window,(const void *)0xC0600000U,sizeof(window));RangeDsp_Reset();
+  }
+  if(rangeDspBench.status!=1)return 0;
+  start=RangeClock_Now();
+  result=RangeDsp_Find(window,benchScan,benchScan+RANGE_SCAN_SLICE,&pos,&q);
+  elapsed=(RangeClock_Now()-start)/1000U;
+  ++rangeDspBench.calls;rangeDspBench.totalUs+=(uint32_t)elapsed;
+  if(elapsed>rangeDspBench.maxUs)rangeDspBench.maxUs=(uint32_t)elapsed;
+  if(result==0)benchScan+=RANGE_SCAN_SLICE;
+  if(result>0 || benchScan>=RANGE_SCAN_ADVANCE) {
+    rangeDspBench.found=result>0;rangeDspBench.quality=q;
+    rangeDspBench.positionQ16=(uint32_t)(pos*65536.0f);
+    AppRange_ResetRound();RangeDsp_Reset();rangeDspBench.status=2;
+  }
+  return 1;
+}
+#endif
+
 void AppRange_Process(void)
 {
   uint32_t now=HAL_GetTick();
   if(!clockReady || !pcb) return;
+#if APP_RANGE_EARLY
+  if(BenchProcess())return;
+#endif
   if(AppCapture_Busy()) {
     uint32_t mask=__get_PRIMASK();
     __disable_irq();readSample=audioCount;seenEpoch=audioEpoch;__set_PRIMASK(mask);
