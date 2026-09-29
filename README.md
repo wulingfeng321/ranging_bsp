@@ -1,411 +1,125 @@
 # ranging_bsp · 双开发板声学测距
 
-## 开发分支与回波实验归档（2026-09-29）
+STM32F746G-DISCO双板，通过以太网统一时间基准，采集同一声音、交换到达时间，显示距离与A/B声源侧，并把双板录音和测量记录保存到A板SD卡。
 
-后续UI优化与其他功能开发使用 **`codex/ui-features`**，固件基线为
-`547e91404b05d1d6b35dd3d1333857cf449d23a8`。该分支仅同步最新README与
-[early1回波处理报告](EARLY1_ECHO_REPORT.md)，不引入early1检测器或DSP优化设置。
+- [项目整体状态与测试概况（2026-09-29）](PROJECT_STATUS_2026-09-29.md)
+- [提交历史与功能日志索引](CHANGELOG.md)
+- [early1回波尝试归档报告](EARLY1_ECHO_REPORT.md)
+- [任务范围与验收指标来源](DEVELOPMENT_PLAN.md)（旧计划，实现状态以当前状态文档为准）
 
-early1代码、工具及分析资料保存在 **`codex/echo-early1`**，代码提交为
-`b33a16a4a98b42edcb5c9c96f09934b2c3561880`。该版在新190 cm实测中暴露了候选门限、
-粗筛相位及连续处理负载问题，目前作为早期尝试归档。
-**回波处理暂停，待回到实验室，在验收环境测试基线后再评估是否继续。**
+## 1. 最新进展
 
-切分支不会改变已烧录固件；两板最后烧录的是early1。若需要测试基线，应从当前分支重新编译、
-烧录，避免使用编译目录中遗留的early1产物。下面保留既有功能说明及历史实验记录。
+当前分支：**`codex/ui-features`**。固件基线：**`547e914`**，48 kHz LEGACY/JOINT2，含SD保存功能。下一阶段进行UI优化及其他功能开发。
 
-## 同步整帧显示（2026-09-26）
+early1回波实验已归档至`codex/echo-early1`（代码`b33a16a`、报告`09a6611`），未合入当前固件。**回波处理暂停，待实验室验收环境测试基线后再决定是否继续。**
 
-统计有效距离已扩展为 **100～2000 mm（含边界）**，通过 `app_board_config.h` 中的
-`APP_RANGE_BATCH_MIN_MM` / `APP_RANGE_BATCH_MAX_MM` 配置，稳定性和最少样本判据保持原值。
+最后一次已知两板固件仍为early1；切换Git分支不会改变板上程序或旧构建产物。要测试基线，须重新编译并分别烧录A/B。
 
-最新界面移除 RMS、DSP/MAX/BK 和采样周期行；同时移除 DMA 中的 RMS 统计。
-新增本地检测阶段 `CG/F1/F2/F3`、`GP/OK/NC/OV`、`QMAX/CMAX`、`GMIN/GTH/QTH/CTH`。
-它们全是本板 **L 通道检测器** 的诊断，放在 R 波形上方也不代表 R 通道。
-检测阈值保持原值。字段解释与操作步骤见 [1.5 m 漏检对照测试](commit_logs/2026-09-26-detector-diagnostics.md)。
+## 2. 整体目标
 
-48 kHz 分支的 LCD 改为每 500 ms 更新一整帧。同步完成后，以 A 板公共时钟的
-500 ms 边界切换双缓冲；提前 100 ms 绘图，主循环继续处理采样和测距。未同步时显示状态，
-丢锁后撤下波形。两板 LCD 垂直刷新独立，因此这不代表屏幕达到 PPS 的微秒级同步。
+完成课程基础1～5及提高2/4/6：双板自动通信/同步、到达时间估计、0.20～2.00 m测距与A/B侧判断、环境/设备适应、现场温度补偿，以及单点标定、测量质量指示、同步波形。
 
-波形横轴仍为最近 160 ms，从左到右按时间排列，取消扫描和自动冻结。
-每帧只截取一段窗口，短声脉冲可能出现在两帧之间；测距仍连续处理全部 48 kHz 音频。
-`D/G/O/EQ`、`AJ/PS/AT-REJ/SYNC-ERR`、`PK/AM/IC/DS` 固定显示在 L 波形上方，
-`RX/DT/R/J`（B 板为 `TX/ACK/R/J`）与新增的检测阶段诊断固定显示在 R 波形上方。
-刷新参数位于 `Core/Inc/app_mic_scope.h`。测试运行 `tools/tests/run_scope_tests.ps1`，
-修改说明见 [同步显示记录](commit_logs/2026-09-26-scope-sync-refresh.md)。
+主要验收指标包括同步脉冲±10 μs、单次误差±10 mm、至少10次标准差≤2 mm、两屏差≤1 mm及播放后2秒内显示。提高标定量程与精度、波形相位等完整要求见状态文档。**目前尚未完成整体验收。** 当前统计允许0.10～2.00 m不等同于量程精度已经达标。
 
-## 48 kHz 分支（2026-09-26）
+声源应在两板外侧，距近端指定麦克风0.5～1 m，与两板指定L麦克风近似共线；测量的是声程差，几何不满足时不等于板间距离。四颗麦克风保留阵列布局。
 
-48 kHz实现最初在 `feat/audio-48khz` 分支从16 kHz基线提交 `464cb35` 创建，默认采样率为48 kHz，
-仍选择 LEGACY / JOINT2、2–6 kHz 测试音频。两板应使用带 `_48000Hz` 后缀的固件，
-播放 [48 kHz 测试音频](tools/test_audio_chirp_48k_repeat.wav)（10.5 s 内容 + 5 s 静默）。
+## 3. 已有功能与验证
 
-采用粗搜索和完整 48 kHz 精匹配的实时处理方式。测试 WAV 的相关乘加总量约为 16 kHz 的
-1.232 倍；屏幕新增 `DSP / MAX / BK` 供上板检查负载。两板编译和主机回归已通过，硬件验证待做。
-构建、测试、内存与负载说明见 [48 kHz 修改记录](commit_logs/2026-09-26-audio-48khz.md)。
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_range_profiles.ps1 -Profiles legacy -JointPeaks
-python tools/sound_make_repeat.py
-```
-
-以下早期版本说明保留用于追溯；旧文件名对应 16 kHz 基线，本分支的使用方法以上述记录为准。
-
-## D9 同步检验脉冲（2026-09-24）
-
-当前代码使用两板 Arduino D9（PA15 / TIM2_CH1）输出锁定后的 1 Hz、
-10 us 检验脉冲；未锁定时保持低电平。A/B IAR 编译已通过，用户报告两板
-示波器同步精度为 ±1.5 us（原始波形待归档）。接线、烧录和连续上升沿测量见
-[D9 同步脉冲验证说明](commit_logs/2026-09-24-sync-pps.md)。
-
-## 16 kHz 基线：旧音频 JOINT2 联合选峰（2026-09-21）
-
-当前选择 `APP_RANGE_AUDIO_LEGACY`，使用旧 `tools/test_audio_chirp_repeat.wav`。
-运行 `python tools/sound_make_repeat.py --sample-rate 16000` 可重新生成：前 10.5 秒为原有 15 个签名，末尾追加 5 秒静默，总长 15.5 秒，便于停止播放并等待统计结束。
-新增 `APP_RANGE_JOINT_PEAKS` 默认在旧音频下开启：两板各发送最多三个候选峰，A 板检查三段
-时间差一致性并拒绝接近评分的多解，不再将每块板独立选择的峰直接相减。
-JOINT2 允许三段各自在联合峰附近 ±1 样点内寻找局部峰，并合并重复候选，修复 JOINT1
-要求三段峰位于同一个整数采样点而频繁拒绝的问题。时间差一致性和歧义阈值保持不变。
-屏幕显示 `RANGE JOINT2`；歧义显示 `PEAK UNCERTAIN`，不发布新距离。
-两板均须更新 `ranging_legacy_joint2_A/B.hex/.out`，详见 [JOINT2 修复说明](commit_logs/2026-09-21_joint2-tolerance.md)。
-
-## 保留的 WIDE / LEGACY 音频切换
-
-`Core/Inc/app_board_config.h` 中的 `APP_RANGE_AUDIO_PROFILE` 可设为 `APP_RANGE_AUDIO_WIDE`，
-播放新增的 `tools/test_audio_wide_repeat.wav`；改为 `APP_RANGE_AUDIO_LEGACY` 即恢复旧检测器和旧音频。
-两板必须使用相同配置。新方案采用 1.5～6.5 kHz 平滑扫频、三脉冲一致性和较早可信峰筛选；
-旧 WAV 与旧模板保留。新旧方案均使用以下 STAT4 统计逻辑。
-
-新固件：`EWARM/ranging_bsp/Exe/ranging_wide_A/B.hex/.out`；旧方案固件：`ranging_legacy_A/B.hex/.out`。
-完整切换方法、生成/构建脚本、验证和局限见 [音频方案说明](commit_logs/2026-09-21_wide-audio-profile.md)。
-主机模拟不能替代真实反射环境测试，尚未验证绝对精度及新算法的板上实时处理余量。
-
-## STAT4 批次统计（两种音频共用）
-
-STAT4 修复单侧异常值导致有效样本被错误剔除的问题：选择跨度不超过 40 mm 的最大样本簇，
-至少保留 6 个且占本轮样本的 60%，最终距离在 100～200 mm 时发布绿色统计结果。
-绿色结果在原有 15 秒有效期内不会被后续黄色单次预览覆盖，新一轮有效统计可更新它。
-两板均须更新 `EWARM/ranging_bsp/Exe/ranging_stat4_A.hex/.out` 和 B 对应固件。
-使用及验证见 [STAT4 修复说明](commit_logs/2026-09-21_repeat-cluster-fix.md)。
-
-针对三次重复的测试音频，每轮最多收集 15 次测量，进行节拍检查、聚类及簇内中位数估计。
-使用 `tools/test_audio_chirp_repeat.wav`，从首次成功配对起等待 11 秒收集窗口结束再开始下一轮。
-历史中位数/MAD 方案见 [原统计说明](commit_logs/2026-09-19_repeat-statistics.md)，当前规则以 STAT4 为准。
-目标工作距离为 10～20 cm，但 ±10 mm 绝对精度尚未验证；统计不能消除固定偏差。以下 TEST3 为前一版记录。
-
-## 最新版本：BOARD RANGE TEST3（2026-09-19）
-
-已实现双板测距和声源 A/B 侧别显示，上板方向已确认正确；约 18 cm 测试仍存在偏差和波动，尚未完成精度验收。TEST3 新增 32 点音频时基拟合与异常回调剔除，主机测试和 A/B IAR 编译通过，现场效果待验证。以下早期阶段说明与历史记录如有差异，以本段、当前源码及 [TEST3 说明](commit_logs/2026-09-19_audio-time-model.md) 为准。
-
-当前源码默认角色为 B。分别设置 `Core/Inc/app_board_config.h` 中的 `APP_BOARD_ROLE` 并编译两板；声源与两个 L 麦克风共线且位于两板外侧，等待 `SYNC READY`、`AT:OK` 后测试。结果保留 15 秒，断线、失锁或音频错误仍清除结果。
-
-本机最新固件为 `EWARM/ranging_bsp/Exe/ranging_board_test3_A.hex/.out` 和 B 对应文件；构建产物按 `.gitignore` 不提交到仓库。请用 IAR 从当前源码生成固件，不要使用历史 UDP/DIAG 固件。工程部分 BSP/字体依赖位于仓库外，构建环境要求见下文。
-
-基于 STM32746G-Discovery（STM32F746G-DISCO）的声学测距项目，使用 STM32CubeMX 生成基础工程，IAR 编译调试，BSP 驱动板载 LCD 和双麦克风。
-
-当前阶段：**开发者已确认双板 UDP 正常通信。已加入指定扫频的实验版双板测距：ETH 硬件时间戳、偏移/频漂拟合、音频模板检测、事件配对和两屏距离/方向发布；本次测距尚待上板验证，不代表精度指标达标。**
-
-双板配置：修改 `Core/Inc/app_board_config.h` 的 `APP_BOARD_ROLE`，A 使用 `APP_BOARD_A`（192.168.10.10，当前默认），B 使用 `APP_BOARD_B`（192.168.10.11）。MAC 与对端地址随角色自动切换，UDP 5000 用于通信状态，5001 用于测距。两台均需更新固件；ONLINE/OK 只表示网络业务通信，SYNC READY 是内部拟合状态。播放方式、参数、硬件边界与验证见 [扫频测距说明](commit_logs/2026-09-18_chirp-ranging.md)，原通信协议见 [双板 UDP 说明](commit_logs/2026-09-18_dual-board-udp.md)。
-
-本文更新于 2026-09-18，代码基线为 `89abe36`（启用 LwIP，开发板 IP 为 192.168.10.10）。上板波形效果及 ping 连通性由开发者确认；这不等于已完成双板同步或测距验收。
-
-完整方案、任务书指标和分阶段验收见根目录 [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)。已确认范围：基础部分全部、提高部分第 2/4/6 项；提高第 5 项（10 m 量程）及更复杂的方向/角度估计为可选。基础 A/B 侧判断必须保留。主线对应任务书 80 分的项目范围，不代表已取得分数。
-
-## 1. 项目目标与整体流程
-
-两块开发板通过以太网口连接同一交换机，建立统一时间基准；两板采集同一测试音，检测其到达时间，将时间差转换为板间距离，并在 LCD 上显示结果与状态。
-
-实验时声源放置在两板连线的延长线上，即两板线段之外。后续需要标定采集链路延迟、评估时钟误差和采样时钟漂移，并约定声速与环境条件。目前尚未选定或实现网络同步协议。
-
-计划的数据流程：
-
-1. 以太网通信与板卡身份识别。
-2. 两板时钟同步，并建立音频样点编号到统一时间的映射。
-3. 连续采集音频，识别同一个测试音事件及其到达位置。
-4. 交换事件编号、到达时间与测量质量信息。
-5. 计算板间距离，判断结果是否有效。
-6. 通过现有 UI 接口发布距离与测量状态。
-
-**LOCAL MIC L/R 是同一块板上的两颗麦克风，不是远端/本地两块开发板。** 屏幕刷新时刻或 DMA 回调进入时刻不能直接当作声音到达时刻。
-
-## 2. 已有功能与验证状态
-
-| 模块 | 已实现内容 | 验证记录/边界 |
+| 功能 | 当前实现 | 验证与边界 |
 | --- | --- | --- |
-| 基础工程 | CubeMX 配置、IAR 工程、HAL/CMSIS、BSP 依赖配置 | 已有构建记录；部分 BSP/字体在仓库外 |
-| LCD | BSP 初始化、SDRAM MPU 配置、黑底网格 | 网格版本已由开发者确认烧录显示正常 |
-| 双麦克风 | WM8994/SAI 双通道 PCM，循环 DMA，半满/全满回调 | 原波形版本编译链接通过；未归档独立硬件验收报告 |
-| 波形显示 | L/R 覆盖扫描、共同自动缩放、每列极值、双缓冲、候选测试音触发保持 | 2026-09-17 开发者确认上板效果符合预期；不提供精确到达时间 |
-| 测试音 | Python 生成重复 Up–Down–Up 扫频签名，附 WAV | 已提交脚本与音频；不是板上播放器 |
-| 测距仪表 UI | 距离占位、有效/等待/测量/无效/过期显示，音频状态 | 最新 UI 已有源码；尚未归档该版本上板验收记录 |
-| 结果接口 | 接收毫米距离与测量状态，5 秒有效期 | 只负责显示，不计算距离 |
-| 以太网/LwIP | A .10 / B .11，独立 MAC，UDP 握手、心跳、测试应答与重连 | 2026-09-18 开发者确认早期版本 ping 成功；双板业务通信及长期稳定性待验收 |
-| TIM5 | 1 MHz、32 位计时配置，当前精简启动不初始化或启动 TIM5 | 未实现同步时钟 |
+| 网络 | A `.10` / B `.11`，UDP握手、心跳、ACK与恢复 | 双板实测及协议回归；长期/交换机负载验收待补 |
+| 同步 | ETH硬件时间戳、频漂拟合、D9/PA15检验脉冲 | 用户报告±1.5 μs；连续边沿原始记录待归档 |
+| 采集/检测 | 48 kHz双通道PCM、样点时基、LEGACY三脉冲联合候选 | 编译、主机回归和多轮录音验证；遮挡/回波仍有失败 |
+| 距离/方向 | 两板L通道配对，A/B侧判断，单次预览及整轮统计 | 多个距离点结果；统计通过不保证选中直达声 |
+| 波形/状态 | 同步后500 ms整帧刷新，最近160 ms本地L/R波形，诊断快照 | 已上板；同步刷新不等于波形相位指标已验收 |
+| 数据保存 | A板USER键保存双板PCM/锚点/事件，成功后清零并重同步 | 实卡写入、回读校验和录音连续性已验证 |
 
-### 早期 16 kHz 音频与显示参数（历史记录）
+当前温度为编译期25°C，固定偏置为0；结果保持15秒。统计窗口11秒，至少6个样本、至少60%且严格多数、簇跨度≤40 mm。现场温度交互与标定尚未完成。
 
-- 标称采样率 16 kHz，16-bit PCM，双通道交错排列。
-- 后续计划优先验证 48 kHz 采集，以细化时间采样；当前固件仍为 16 kHz。升级需同步调整 DMA/窗口/检测模板并评估误差，详见开发方案，不能只修改采样率宏。
-- 每个 DMA 半缓冲包含 256 个双通道采样帧，标称 16 ms；完整 DMA 缓冲 2048 字节。
-- 覆盖扫描缓冲与显示快照各 2560 帧，横轴 160 ms、20 ms/div；目标刷新间隔 40 ms。
-- 波形采用从左向右的覆盖扫描，到右端后回到左端；旧数据保持横向位置，不再整屏滚动。本轮数据为亮色，上一轮尚未覆盖的数据为暗色；扫描竖线和原有间隙已移除。保留两路共同自动幅度缩放，因此实时显示的纵向比例仍可能随音量变化。
-- 任一路出现符合 Up–Down–Up 趋势和静音间隔的候选音频时，保存完整的 160 ms 双通道时间窗；当前扫描轮结束后显示这份按时间顺序排列的快照，默认保持 2 秒，然后恢复实时显示。保持时不停止 DMA，也不冻结距离/状态区。
-- 在 `Core/Inc/app_mic_scope.h` 中通过 `MIC_SCOPE_HOLD_MS` 设置保持毫秒数（默认 2000，设为 0 禁用），通过 `MIC_SCOPE_TRIGGER_MIN_LEVEL` 设置平均绝对 PCM 幅度门限（默认 128）。检测仅用于调试触发，不输出精确到达时刻，不代表已实现跨板同步或测距。
-- 顶部为测距信息区，下方分别绘制本地 L（绿色）与 R（青色）波形。
-- 显示缓冲位于 `0xC0000000`、`0xC0080000`，音频 DMA 缓冲位于 `0xC0100000`；使用非缓存 SDRAM 区域。
+常规测试：A插FAT/FAT32 SD卡、两板联网 → 等`CAP ARM`、`SYNC READY`、`AT:OK` → 播放[48 kHz测试音](tools/test_audio_chirp_48k_repeat.wav)一次（10.5+5秒）→ `CAP HELD`后按A蓝色USER键 → 等保存完成及重新同步。失败轮也保存，完整目录须含`A.RNG`、`B.RNG`及`COMPLETE.TXT`。详细异常处理和解码步骤见状态文档第6节。
 
-### 测试音参数
+已有主机回归入口（需要本机MSVC与相应Python依赖，脚本中的工具路径可调整）：
 
-生成入口：[tools/sound_make.py](tools/sound_make.py)，音频：[tools/test_audio_chirp.wav](tools/test_audio_chirp.wav)。
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/tests/run_host_tests.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/tests/run_scope_tests.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/tests/run_capture_tests.ps1
+```
 
-- 输出为 16 kHz、16-bit PCM、单声道 WAV。
-- 单段 32 ms / 512 点；上扫 2→6 kHz，下扫 6→2 kHz；两端各 1 ms 渐变，中间保持恒定包络。
-- 签名：Up 32 ms + 静音 8 ms + Down 32 ms + 静音 8 ms + Up 32 ms，共 112 ms / 1792 点。
-- 签名每 500 ms 重复一次，共 5 次；完整文件含尾部静音，总长 2.5 s。
-- 后续检测模板应与脚本的实际相位、幅度和离散窗定义一致，不应自行替换为整段 Hann 窗。
+这些脚本已有通过记录，本次文档整理没有重跑或重新验收硬件。
 
-## 3. 待开发内容
+## 4. 待开发内容
 
-TIM5 已保存 `Prescaler=99`、`Period=0xFFFFFFFF` 的配置，在当前时钟树下对应 1 MHz（1 us/计数）。当前 `LCD_GRID_DEMO_ONLY=1`，使用 BSP 精简启动、独立初始化网口，未初始化或启动 TIM5，也未实现跨板同步。
+- UI布局与交互优化：清晰区分单次、统计、旧值、失败及保存状态，保留方向判断与必要诊断。
+- 现场温度设置、声速展示及参数持久化；单点标定流程与误差预算。
+- 验收环境下的单次精度、重复性、两屏差、显示延迟、静默/换设备/异常恢复测试。
+- 同步波形的单音相位、抖动及移动实验；不能仅以两屏同时刷新代替验收。
+- 回实验室后评估是否需要恢复回波开发。当前不继续调门限、不进行RTOS重构或2 m以上新测试。
 
-- 两板经交换机的 UDP 业务通信已实现首版，待上板验证及长期运行测试。
-- 统一时钟及同步质量评估，音频样点时间戳映射。
-- 测试音检测、签名关联、到达时间估计与异常事件剔除。
-- 板间时间差交换、距离计算、链路延迟标定与误差评估。
-- 网络断连、不同步、事件不匹配等情况的状态处理。
-- 两板端到端验证及可复现的测试记录。
-- 基础 A/B 侧判断、现场温度设置与声速补偿。
-- 单点标定后 0.20–5.00 m 测距、测量质量指示、两板同步波形显示。
+## 5. 工程结构
 
-当前通过 `MX_LWIP_Init()` 初始化网络，主循环持续调用 `MX_LWIP_Process()` 和 `MicScope_Process()`；LwIP 堆配置已为 8 KiB。ping 成功是网络起点，后续仍需独立 IP/MAC、业务协议、同步与断线恢复。重新生成 CubeMX 代码后仍需检查 BSP/CubeMX 初始化归属和 LTDC 中断句柄。具体开发顺序见 [开发方案](DEVELOPMENT_PLAN.md)。
-
-## 4. 工程入口与构建
-
-| 路径 | 用途 |
+| 路径 | 职责 |
 | --- | --- |
-| [Core/Src/main.c](Core/Src/main.c) | 系统时钟、MPU、LCD 初始化和主循环 |
-| [Core/Src/app_mic_scope.c](Core/Src/app_mic_scope.c) | 音频缓存、波形和测距仪表 UI |
-| [Core/Inc/app_mic_scope.h](Core/Inc/app_mic_scope.h) | 对外 UI 接口与状态定义 |
-| [Core/Src/stm32f7xx_it.c](Core/Src/stm32f7xx_it.c) | 中断入口，包括音频 DMA |
-| [Core/Src/stm32f7xx_hal_msp.c](Core/Src/stm32f7xx_hal_msp.c) | 外设引脚、时钟等底层配置 |
-| [ranging_bsp.ioc](ranging_bsp.ioc) | CubeMX 配置 |
-| [EWARM/ranging_bsp.ewp](EWARM/ranging_bsp.ewp) | IAR 工程 |
-| [commit_logs/](commit_logs/) | 功能提交日志与交接记录 |
-| [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) | 任务范围、技术路线、开发阶段与验收清单 |
+| `Core/Inc/app_board_config.h` | A/B角色、采样率、音频方案、温度和统计配置 |
+| `Core/Src/main.c` | 初始化、MPU与主循环调度 |
+| `Core/Src/app_net.c` | 双板网络与会话管理 |
+| `Core/Src/range_clock.c`、`range_sync.c` | 硬件时基、D9脉冲及同步模型 |
+| `Core/Src/app_range.c`、`range_dsp.c` | 音频时基、检测、事件与测距 |
+| `Core/Inc/range_peak_pair.h`、`range_batch.h` | 联合候选配对、批次统计 |
+| `Core/Src/app_mic_scope.c` | 本地双通道波形与测量界面 |
+| `Core/Src/app_capture.c`、`capture_sd.c` | 双板录音事务及SD驱动 |
+| `LWIP/`、`FATFS/`、`Drivers/`、`Middlewares/` | 网络、文件系统与芯片依赖 |
+| `ranging_bsp.ioc`、`EWARM/ranging_bsp.ewp` | CubeMX及IAR配置 |
+| `tools/`、`tools/tests/` | 音频生成、角色构建、解码及主机回归 |
+| `commit_logs/` | 功能实现、测试与交接记录 |
 
-打开 IAR 工程后构建 `ranging_bsp` 配置。此前使用 IAR Embedded Workbench 8.x 构建；换工具版本时应在日志注明实际版本。
+仓库还依赖上层目录`../../Drivers/BSP/STM32746G-Discovery`、`../../Drivers/BSP/Components`及`../../Utilities/Fonts`。单独克隆时须补齐匹配依赖，保留共享相对路径。
 
-BSP 与 Fonts 当前由 IAR 的相对路径引用，预期目录关系如下：
+## 6. 工作交接规范
 
-```text
-STM32CubeF7_cut/
-├─ Drivers/BSP/STM32746G-Discovery/
-├─ Drivers/BSP/Components/
-├─ Utilities/Fonts/
-└─ Project/ranging_bsp/          ← 本仓库
-   ├─ Core/
-   ├─ EWARM/
-   └─ commit_logs/
-```
+1. 先读当前状态、分支及`git status`，保留同伴未提交改动；明确源代码版本和板上固件版本。
+2. 功能修改在`commit_logs/`记录目的、关键文件/接口、单位与时基、资源影响、验证、未验证项和下一步，并更新[历史索引](CHANGELOG.md)。源码与日志一起提交，文档改变也简述原因。
+3. ISR只做必要搬运/计数；绘图、写卡和长计算放在主循环。修改DMA/SDRAM/Cache/MPU/时钟/中断时须核对连续采集和网络负载。
+4. `LOCAL MIC L/R`均为本板麦克风。测距使用L；UI接口`MicScope_SetDistanceMm`接收毫米，仅在新结果到达时发布，不重复延长旧结果。接口须标明调用上下文、缓冲归属和生命周期。
+5. 协议、采样率、模板或温度配置变化时两板保持一致。CubeMX生成后检查main用户区、`ethernetif.c`时间戳补丁、BSP句柄、SDDMA/IRQ和IAR源文件，不把生成覆盖当成无意义差异。
+6. 固件修改至少编译相关A/B配置并做针对性验证；区分主机通过、编译通过、实机通过与完整验收。保存失败轮、音频版本、真实几何、播放设备/音量和温度。
+7. 暂存前审阅差异；不无差别提交个人IDE状态、临时目录、构建产物或大体积原始录音。共享`.ioc/.ewp/.ewd`变更说明原因。推送、烧录和测试记录各自明确。
 
-单独克隆本仓库后，需要补齐匹配版本的上层 BSP/Fonts。不要用个人电脑的绝对路径代替共享相对路径。调试时连接板载 ST-LINK USB 口，选择与板载 ST-LINK/V2-1 匹配的探针选项；此前误选 V1 曾导致找不到调试器。
+## 7. 命令行分别编译与烧录两板
 
-## 5. 模块交接约定
+在工程根目录的PowerShell运行。以下使用已验证的IAR 8.2安装路径和本项目探针映射，换电脑/探针后须核对路径与序列号。`.xcl`内也包含本机路径。
 
-### 结果 UI
+### 编译A/B
 
-在 `MicScope_Init()` 之后，由主循环调用以下接口；不要从 DMA 或网络中断直接调用：
-
-```c
-void MicScope_SetDistanceMm(uint32_t millimeters);
-void MicScope_SetRangeState(MicScope_RangeState state);
-```
-
-- `SetDistanceMm` 接收 **板间距离，单位毫米**，允许 0..999999；有效结果显示为米、小数点后三位，显示位数不代表测量精度。
-- `SetRangeState` 用于 WAITING、MEASURING 或 INVALID；VALID 必须通过 `SetDistanceMm` 发布。
-- 有效结果在发布后 5 秒过期；只在获得新结果时发布，不能重复提交旧数值来延长显示有效期。
-- 网络/算法模块负责同步、计算和结果有效性；UI 不推断这些状态。
-
-### 采集、时钟与外设
-
-- ISR 中仅做必要的数据搬运、计数或事件通知；耗时算法、网络业务处理与绘图在主循环或明确规划的任务中执行。
-- 新增接口必须写明单位、数据类型、范围、时间基准、调用上下文、缓冲区归属与生命周期。
-- 修改 DMA、SDRAM、缓存/MPU、时钟或中断优先级时，日志必须说明对音频连续性与显示的影响。
-- 保持 BSP 与 CubeMX 对同一外设的初始化职责明确；重新生成代码后检查用户区、引脚速度及工程文件差异。
-- 最新 UI 提交曾将 SAI 引脚速度从 HIGH 改回 LOW，后续音频联调需确认实际板上表现。这个差异已记录于对应提交日志。
-
-## 6. 功能完成后的提交与交接规范
-
-**每完成一个功能或修复，在上传 GitHub 前，必须在 `commit_logs/` 编写对应 Markdown 日志，并随相关代码一同提交。** 小型相关修改可以合为一个功能提交；不相关功能应拆分。仅文档或配置变更也要简要记录其目的与影响。
-
-### 推荐流程
-
-1. 开始工作前查看当前分支与工作区状态，确认协作基线。已有本地改动先妥善保留，不覆盖同伴工作；涉及共同文件先约定分工。
-2. 完成一个边界清晰的功能，检查涉及的源码、CubeMX/IAR 配置与依赖路径。
-3. 运行适合该修改的验证：固件修改至少编译链接，硬件相关修改尽量上板；双板功能记录两板固件版本、接线、交换机/网络条件与测试结果。纯文档修改检查内容和链接即可。
-4. 编写功能日志，区分“已经验证”“尚未验证”和“已知问题”。没有硬件条件时写明待验证事项，不写成测试通过。
-5. 若功能状态、构建方法或接口发生变化，同步更新本 README；协议、采样率或时间单位变化必须特别说明兼容性。
-6. 查看 `git status` 和 `git diff`，只暂存本次需要的源码、配置与文档，再检查 `git diff --cached`。不要无差别打包个人 IDE 会话、编译产物、临时文件或备份目录。
-7. 提交代码与日志，确认暂存内容准确，再将对应分支推送到 GitHub，通知同伴提交/分支及日志位置。
-8. 接手者阅读日志，按步骤构建和复测，再开展依赖该功能的工作；未完成的验证继续保留为待办。
-
-共享的 `.ewp`、`.ewd`、`.ioc` 若有必要变更，应纳入并说明。`EWARM/settings/` 中的个人调试路径和窗口状态通常不应随功能提交；已经被 Git 跟踪的文件不会因为新增忽略规则自动停止跟踪，需要团队另行决定处理方式。
-
-### 命名与 Git 提交消息
-
-新日志采用 `YYYY-MM-DD_功能短名.md`，例如 `2026-09-18_ethernet-link.md`；同日同名可加序号。已有 `日期_短哈希.md` 的历史日志保留。
-
-日志与代码同次提交时，**不要要求日志包含该次提交自己的哈希**，否则提交内容变化会再次改变哈希。可记录开发基线哈希，在提交消息中引用日志路径；需要补充最终哈希时放到后续汇总记录。
-
-Git 提交标题建议使用 `类型(模块): 修改说明`：
-
-```text
-feat(ethernet): 增加两板链路状态检测
-fix(audio): 修复音频 DMA 数据丢失
-docs(readme): 更新构建和交接说明
-```
-
-标题中的功能必须与实际完成内容一致，例如只添加距离显示接口时，不应写“完成测距”。
-
-### 功能日志模板
-
-复制下面模板到 `commit_logs/`，删除不适用项或明确填写“不涉及”。
-
-```markdown
-# 功能名称
-
-- 日期：YYYY-MM-DD
-- 作者：Git 作者名 / 协作者
-- 分支：实际分支名
-- 开发基线：修改前的提交哈希
-- 状态：已完成并验证 / 已实现待上板 / 部分完成
-
-## 目的与范围
-
-解决什么问题，本次完成到哪一步。
-
-## 修改内容
-
-- 关键文件、函数及行为变化。
-- 新增依赖、时钟/引脚/中断/内存/工程配置变化。
-
-## 接口与兼容性
-
-- 参数单位、有效范围、时间基准和错误语义。
-- 调用上下文、缓冲区归属及生命周期。
-- 对其他模块的影响，以及接手者需要修改的调用。
-
-## 验证
-
-- 环境：工具版本、板卡、固件基线、接线/网络条件。
-- 步骤：可复现的构建、烧录或测试操作。
-- 预期结果与实际结果：分别填写，附必要输出或截图位置。
-- 编译错误/警告及处理情况。
-- 未验证项：明确列出，不以编译通过代替上板验证。
-
-## 已知问题与下一步
-
-- 限制、未完成功能、依赖同伴完成的事项。
-- 接手后的第一步、验收条件及必要的回退说明。
-```
-
-## 7. 历史提交日志
-
-按 Git 作者时间（UTC+08:00）排列。作者名称保留原始 Git 记录，最新一项 `unknown` 对应同伴提交，建议后续配置可识别的作者名。
-
-| 作者时间 | 提交日志 | 作者 | 内容 |
-| --- | --- | --- | --- |
-| 2026-09-16 21:19:15 | [4980543](commit_logs/2026-09-16_4980543.md) | wulingfeng | 初始化开发板工程与依赖 |
-| 2026-09-16 21:27:13 | [cc1b82f](commit_logs/2026-09-16_cc1b82f.md) | wulingfeng | BSP 与字体搜索路径 |
-| 2026-09-16 21:40:48 | [d95032b](commit_logs/2026-09-16_d95032b.md) | wulingfeng | 调试器修正与 LCD 网格 |
-| 2026-09-16 21:54:19 | [c58d07f](commit_logs/2026-09-16_c58d07f.md) | wulingfeng | 双麦采集与波形显示 |
-| 2026-09-16 22:16:45 | [475d1f9](commit_logs/2026-09-16_475d1f9.md) | wulingfeng | 扫频测试音生成 |
-| 2026-09-17 12:53:47 | [50c5c4c](commit_logs/2026-09-17_50c5c4c.md) | unknown | 测距 UI 与结果接口 |
-
-历史日志保留当时的实际变化与验证边界，不改写 Git 历史；后续功能日志应继续补充到此索引。
-
-文档记录：[完善 README 与交接规范](commit_logs/2026-09-17_readme-handoff.md)。
-
-覆盖扫描功能记录：[波形改为覆盖扫描](commit_logs/2026-09-17_waveform-overwrite.md)。
-
-测试音观察功能记录：[候选测试音触发波形保持](commit_logs/2026-09-17_waveform-trigger-hold.md)。
-
-计时资源与仓库清理记录：[TIM5 分频配置与备份清理](commit_logs/2026-09-17_tim5-backup-cleanup.md)。历史备份目录已移除，需要旧版本时通过 Git 历史恢复。
-
-网络基线 `89abe36`：开发者已确认 ping 成功；相关修正见 [ETH 初始化](commit_logs/2026-09-18_lwip-eth-init-build-fix.md) 与 [LTDC 中断句柄](commit_logs/2026-09-18_ltdc-bsp-irq-handle.md)。
-
-规划记录：[任务书范围与开发路线](commit_logs/2026-09-18_project-roadmap.md)。
-
-## A板USER键保存本轮数据到SD卡（2026-09-28）
-
-功能开发前的检查点：`dd73c22`（48 kHz、同步整屏波形、联合选峰拒绝诊断及当日测试汇总）。
-
-### 操作
-
-1. SD卡插A板，保持两板网线连接。当前FatFs支持FAT/FAT32，不支持exFAT；程序不会格式化卡。
-2. 等两板 `SYNC READY`、`AT:OK`。左上角 `CAP ARM` 表示可以开始一轮。
-3. 播放一次现有10.5+5秒音频。不要在保存前重复播放。首个本地或对端有效检测会触发录音，显示 `CAP RECORDING`；自动保留后显示 `CAP HELD / A USER`。
-4. 播放结束后，短按**A板蓝色USER键**，不是黑色RESET键。两板暂停测量，A先保存自身数据，再接收并保存B数据。左上角显示 `CAP SAVE A/B xx%`。
-5. 等A显示 `SAVED Rxxxxxx / ARM`，两板重新 `SYNC READY`、`AT:OK` 后再播放下一轮。测量计数、选峰诊断及统计批次已清零，时钟重新建立同步。无需手动复位。
-6. 测完且不再显示保存进度时取卡，将相应的整个 `R000001`、`R000002` 等目录复制到电脑，并另行注明真实距离、播放侧、遮挡路径。之后继续测量前请重新插卡。
-
-`CAP ERR n / RETRY` 表示本轮没有清零，修复卡/连接问题后再次短按USER可重试。错误前缀：1xx写入（199为空间不足等短写）、2xx关闭、3xx打开、4xx挂载、5xx创建目录；末两位通常为FatFs错误码。902等待B冻结超时，904接收B超时。无卡常见403，exFAT/无有效FAT文件系统常见413。`CAP NEED PEER` 表示网络未就绪。`CAP SAVED / RESET B` 或 `ARM B` 表示已写完，正在重试清零/恢复握手，此时先检查网线，不要开始播放。
-
-失败重试会创建新的目录，不覆盖旧文件。**只将含有有效 `COMPLETE.TXT` 的目录作为完整的一轮**；不完整目录保留供恢复。掉电/复位会丢失尚未保存的RAM。任一板复位导致会话变化时不允许把旧轮和新轮拼接；`CAP PEER RESET`/901需要保留已写文件并重新开始两板测试。
-
-### 保存内容与解码
-
-每轮SD目录包含 `A.RNG`、`B.RNG`、`COMPLETE.TXT`，通常总计约6.2 MB。RNG1文件封装原始16位、48 kHz、双通道PCM（与屏幕L/R相同的通道顺序），每个16 ms DMA块的绝对样本计数/本地纳秒时间戳/音频连续性epoch，以及检测事件、三个脉冲的候选偏移/质量、配对接受或拒绝记录、DSP各阶段计数、统计结果和温度设置。采样未经显示抽取或幅度缩放。
+脚本一次运行会**分别创建A/B角色项目并依次编译**，无需手动改头文件；当前头文件默认B。本脚本没有单独`-Board`选项。必须带`-JointPeaks`：
 
 ```powershell
-python tools/decode_capture.py 'C:\Users\hhcch\Desktop\本轮数据\R000001'
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_range_profiles.ps1 -SampleRate 48000 -Profiles legacy -JointPeaks
+if ($LASTEXITCODE -ne 0) { throw 'A/B build failed' }
 ```
 
-脚本先核对两份文件的长度与FNV-1a校验值，再在该目录的 `decoded` 子目录导出：
+对应产物位于`EWARM/ranging_bsp/Exe/`：
 
-- `A.wav`、`B.wav`：各自双通道原始音频。
-- `A.json`、`B.json`：版本、采样率、温度、触发、同步等元数据。
-- `*_anchors.csv`：WAV样本位置到本地硬件时间的锚点，供跨板对齐；两份WAV的起点不必相同。
-- `*_event.csv`、`*_clock.csv`、`*_candidate.csv`、`*_pair.csv`：逐事件时间及选峰过程；配对主要发生在A板，B板配对表为空属正常。
-- `*_status.csv`、`*_dsp.csv`：本轮计数/结果和检测阶段诊断；`*_all.csv`为原始日志总表。
+- A：`ranging_legacy_joint2_A_48000Hz.out` / `.hex`
+- B：`ranging_legacy_joint2_B_48000Hz.out` / `.hex`
 
-需要分析时直接提供整个原始目录即可，不要求先自行解码。日志中的数组索引从0开始。
+必须确认刚刚从目标分支构建成功，不直接使用切分支前留下的旧产物。
 
-### 录音边界与实现
+### 分别烧录A/B
 
-每板使用独立SDRAM环形缓冲，最长16秒；任一板首次识别后，再录12秒并自动冻结，保留之前最多4秒。这覆盖现有测试音的15组签名，按键晚一些也不会用静默覆盖已冻结的声音。触发通过独立UDP 5002端口重发；时间对齐依靠采样锚点及事件时钟映射，不假设两板文件同时开始。
-
-如果两板整轮都没有识别，始终显示 `CAP ARM`，则按键保存最近16秒，应在播放结束后立即按键；这种情况没有自动冻结保护。该机制面向当前约10.5秒的测试音，不适用于任意更长录音。按键提前也会提前冻结，正常测试应等播放结束。
-
-写卡采用逐块主循环状态机，音频ISR只复制PCM；A/B保存期间暂停测距和时钟同步协议处理。全部文件关闭成功后，以幂等RESET/ARM握手清空两板并重建同步，丢包/重复包不会再次清空新轮。SD驱动位于 `Core/Src/capture_sd.c`；capture3起使用DMA2 Stream3/6 Channel4及SDMMC1中断，有界等待完成与卡就绪。512字节DMA中转缓冲位于非缓存SDRAM `0xC0551000`，紧接录制文件头，避免未对齐FatFs缓冲及M7缓存一致性问题。音频仍用DMA2 Stream7，互不占用通道。没有改动CubeMX提供的库组件。IAR工程新增 `app_capture.c`、`capture_sd.c`，重新生成工程后需保留这两个源文件及main.c用户区调用，避免重复定义SDMMC1/Stream3/Stream6 IRQ处理函数。
-
-出现磁盘错误时第二行保留底层诊断，例如 `SD W H1 E00000010`：`W/R`为DMA写/读，`B`为等待卡就绪，`I/D`为SD/DMA初始化，`N`为未检测到卡；`H`为HAL状态（1错误、2忙、3超时），`E`为十六进制HAL SD错误位。`E00000010`表示发送FIFO欠载，`E00000020`表示接收溢出，`E00000002`表示数据CRC错误。请连同顶行CAP错误码一起拍照。首个错误在终止传输/关闭文件之前锁存，下次挂载重试时清除；不会因后续清理操作而丢失。B停在 `CAP SEND TO A` 表示保留本轮并等待A完成。
-
-capture4修正SD DMA为`DMA_PFCTRL`，与Discovery官方BSP一致：capture3在实卡扇区0读取中出现最后4个字未搬完、HAL超时但错误位为0，导致401。修正后已在连接的两板上完成一次约30秒的实际保存，A显示`SAVED R000003 / ARM`；此目录是环境音功能测试。随后R000004近距离测试已通过读卡器回读：A/B文件长度与FNV1a均匹配，四通道各16秒、采样连续、15次测试信号完整且无削顶，详见集中测试记录。
-
-调试器可向`appCaptureSaveRequest`写入`APP_CAPTURE_SAVE_REQUEST`，A主循环在空闲/错误状态走与USER键相同的保存流程，供连接实机验证；正常操作仍使用USER键。该请求不跳过SD错误处理或两板清零握手。
-
-无RTC日期设置，文件系统日期固定为2026-09-28，目录序号与记录内部时间用于识别轮次。不要用文件时间推算声传播时间。
-
-验证命令：`tools/tests/run_capture_tests.ps1`、`tools/tests/run_host_tests.ps1`、`tools/tests/run_scope_tests.ps1`。录制测试覆盖环形回绕、自动冻结、传输数据一致性、丢包重试、损坏包/旧事务拒绝、写入/关闭失败保留、清零顺序及按键消抖；真实SD卡按键保存仍需实机完成一轮核验。
-
-### 已归档：2026-09-29有界早到选峰实验（early1）
-
-**以下仅描述`codex/echo-early1`分支。`codex/ui-features`已恢复`547e914`算法，
-本节的实验脚本和宏不属于该分支当前代码。实验结果与未来计划见根目录报告。**
-
-48 kHz、LEGACY、联合三脉冲模式默认启用 `APP_RANGE_EARLY`。粗筛平方相关门限为0.04；在首次粗筛附近向前4 ms、向后12 ms搜索，三个脉冲各自质量至少0.30、位置跨度不超过3个采样点。合并0.4 ms内的旁峰后，在质量不低于最强候选65%的候选中选择最早者。去掉旧的间隙能量否决，避免混响填满间隙时漏检。送往配对层的是选出的一个三脉冲候选，单次预览及2 m统计范围保留。较弱直达声仍可能未达门限，不能保证每次预览正确。
-
-实现使用约17.1 KB静态工作区，每次主循环最多计算16个位置，继续服务网络；不需要录完整段后才分析。整数64位累加防溢出，M7使用双16位乘累加指令。**IAR工程中 `range_dsp.c` 单文件必须保留 High/Speed 优化**；CubeMX重新生成后须检查此项，低优化版本无法满足处理速度。其他源文件保持原优化级别。设置 `APP_RANGE_EARLY=0` 可回退旧检测器，必须将两板编译为一致配置。
-
-复现 C 回放与连续处理测试：
+两块板连接ST-LINK USB。下列两个调用按探针序列号分别下载，并在完成后运行；驱动配置已启用下载校验。仅阅读文档不会执行烧录。
 
 ```powershell
-./tools/tests/run_early_tests.ps1 -Captures 'C:/Users/hhcch/Desktop/SD_capture_verified/2026-09-29_50cm_source'
-./tools/build_range_profiles.ps1 -Profiles legacy -JointPeaks
+$cspy = 'C:/Program Files (x86)/IAR Systems/Embedded Workbench 8.2/common/bin/CSpyBat.exe'
+$general = (Resolve-Path 'EWARM/settings/ranging_bsp.ranging_bsp.general.xcl').Path
+$driver = (Resolve-Path 'EWARM/settings/ranging_bsp.ranging_bsp.driver.xcl').Path
+function Flash-RangeBoard([string]$Board, [string]$Probe) {
+    $firmware = (Resolve-Path "EWARM/ranging_bsp/Exe/ranging_legacy_joint2_${Board}_48000Hz.out").Path
+    & $cspy -f $general "--debug_file=$firmware" --download_only --leave_target_running --silent --timeout 60000 --backend -f $driver "--drv_communication=USB:#$Probe"
+    if ($LASTEXITCODE -ne 0) { throw "Board $Board download failed" }
+}
+Flash-RangeBoard 'A' '67230834'
+Flash-RangeBoard 'B' '87134138'
 ```
 
-`run_host_tests.ps1` 继续覆盖旧16/48 kHz检测器；新算法由 `run_early_tests.ps1` 覆盖。板上计时可用 `tools/tests/bench_early_board.py`，需pyOCD及新固件符号表：它经调试器上传单个录音窗口到空闲SDRAM、请求有界处理并清空测量轮次，不播放声音、不写SD。该计时只验证计算和调度片段，完整声学测试仍使用扬声器和用户按键。
-
-新采集文件固件标识为 `547e914+early1`。建议先保持B侧、近端50 cm、双屏遮挡、无抱枕，在190 cm复测3轮，再150/170 cm各3轮；等待 `SYNC READY` 且 `AT:OK` 后播放原10.5+5秒音频，`CAP HELD` 后按A板用户键保存。提交完整R目录和每轮真实距离/遮挡情况；不要只保存出结果的轮次。
+既有探针对应：A完整序列号`0675FF514966504867230834`，B为`0667FF485153826687134138`；命令使用IAR识别的短号。A应为插SD卡的板，不要仅凭USB枚举次序分配角色。烧录后连接两板网络，检查角色、`NET ONLINE`、`SYNC READY`、`AT:OK`，再开始测试。
