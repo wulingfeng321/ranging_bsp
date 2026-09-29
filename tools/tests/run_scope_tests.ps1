@@ -17,6 +17,10 @@ foreach ($role in 1,2) {
     $commands += 'if errorlevel 1 exit /b 1'
     $commands += "`"$out/scope$role.exe`" `"$out/scope$role`""
     $commands += 'if errorlevel 1 exit /b 1'
+    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_position.c Core/Src/range_dsp.c Core/Src/range_sync.c /Fe`"$out/position$role.exe`""
+    $commands += 'if errorlevel 1 exit /b 1'
+    $commands += "`"$out/position$role.exe`""
+    $commands += 'if errorlevel 1 exit /b 1'
     $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_wave.c Core/Src/range_dsp.c Core/Src/range_sync.c /Fe`"$out/wave$role.exe`""
     $commands += 'if errorlevel 1 exit /b 1'
     $commands += "`"$out/wave$role.exe`""

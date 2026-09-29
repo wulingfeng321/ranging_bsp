@@ -142,7 +142,7 @@ static void Seal(void)
   sealedPeer=AppNet_PeerSession();
   memset(HEADER,0,HEADER_SIZE);
   (void)snprintf(HEADER,HEADER_SIZE,
-    "{\"format\":\"RNG1\",\"firmware_base\":\"b09767f+live-wave1\",\"board\":\"%s\","
+    "{\"format\":\"RNG1\",\"firmware_base\":\"76e946c+position1\",\"board\":\"%s\","
     "\"rate\":%lu,\"channels\":2,\"sample_bytes\":2,\"frames\":%lu,\"header_bytes\":4096,"
     "\"anchor_count\":%lu,\"anchor_bytes\":24,\"log_bytes\":%lu,\"log_overflow\":%lu,"
     "\"triggered\":%lu,\"temperature_deci_c\":%d,\"profile\":%d,\"joint\":%d,"
@@ -293,10 +293,10 @@ void AppCapture_Process(void)
     if(raw!=buttonRaw) { buttonRaw=raw;buttonTick=now; }
     if(now-buttonTick>=40U && raw!=buttonStable) {
       buttonStable=raw;
-      if(raw && AppRange_Page()!=APP_PAGE_WAVE && (state==IDLE || state==ERROR_STATE)) StartSave();
+      if(raw && AppRange_Page()!=APP_PAGE_WAVE && AppRange_Page()!=APP_PAGE_POSITION && (state==IDLE || state==ERROR_STATE)) StartSave();
     }
     if(appCaptureSaveRequest==APP_CAPTURE_SAVE_REQUEST && (state==IDLE || state==ERROR_STATE)) {
-      appCaptureSaveRequest=0;if(AppRange_Page()!=APP_PAGE_WAVE) StartSave();
+      appCaptureSaveRequest=0;if(AppRange_Page()!=APP_PAGE_WAVE && AppRange_Page()!=APP_PAGE_POSITION) StartSave();
     }
   }
   /* StartSave seals/logs the round and stamps deadline with a fresh tick.

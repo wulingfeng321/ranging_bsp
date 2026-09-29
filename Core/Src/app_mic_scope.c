@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #define FRAME_A 0xC0000000U
 #define FRAME_B 0xC0080000U
@@ -263,6 +264,88 @@ static void WaveLive(void)
   Text(12,241,"LIVE VIEW / 20Hz TARGET / 10ms WINDOW",MUTED);
   Text(12,257,audioStatus,MUTED);
 }
+
+static void PositionLine(int x0,int y0,int x1,int y1,uint32_t color)
+{
+  int dx=abs(x1-x0),sx=x0<x1?1:-1,dy=-abs(y1-y0),sy=y0<y1?1:-1,err=dx+dy;
+  for(;;) {
+    int twice;
+    if(x0>=0 && x0<480 && y0>=0 && y0<272) Box((uint16_t)x0,(uint16_t)y0,2,2,color);
+    if(x0==x1 && y0==y1) break;
+    twice=2*err; if(twice>=dy) { err+=dy;x0+=sx; } if(twice<=dx) { err+=dx;y0+=sy; }
+  }
+}
+static void Outline(unsigned x,unsigned y,unsigned w,unsigned h,uint32_t color)
+{ Box(x,y,w,2,color); Box(x,y+h-2,w,2,color); Box(x,y,2,h,color); Box(x+w-2,y,2,h,color); }
+static void PositionPage(uint32_t now)
+{
+  char line[80];
+  int valid=appPositionStatus.valid && appRangeStatus.locked && AppRange_SettingsReady() &&
+            now-appPositionStatus.updatedMs<=1500U;
+  Common(); Font(&Font12);
+  if(APP_AUDIO_SAMPLE_RATE!=48000U) { Text(12,100,"POSITION REQUIRES 48kHz FIRMWARE",WARN); return; }
+  if(APP_BOARD_ROLE==APP_BOARD_A) {
+    Text(12,76,"A LEFT / B RIGHT / KEEP STILL",ACCENT);
+    Button(340,74,128,26,"CAL FRONT 50cm",AppRange_SettingsReady());
+    PositionLine(208,103,434,103,MUTED); Text(293,87,"13 cm",ACCENT);
+    Outline(12,116,226,100,0xFFFFFFFFU); Outline(238,116,230,100,0xFFFFFFFFU);
+    Outline(24,128,166,76,0xFF168DFFU); Outline(250,128,166,76,0xFF168DFFU);
+    Font(&Font24); Text(94,154,"A",0xFFFFFFFFU); Text(320,154,"B",0xFFFFFFFFU); Font(&Font12);
+    Box(204,145,10,10,0xFFFF4444U); Box(204,180,10,10,0xFFFF4444U);
+    Box(430,145,10,10,0xFFFF4444U); Box(430,180,10,10,0xFFFF4444U);
+    Text(219,145,"L",MUTED); Text(219,180,"R",MUTED);
+    Text(447,145,"L",MUTED); Text(447,180,"R",MUTED);
+  } else {
+    Text(12,76,"SOURCE DIRECTION / 0 DEG = TOP",ACCENT);
+    Outline(107,146,166,36,PANEL);
+    Box(106,146,8,8,0xFFFF4444U); Box(106,174,8,8,0xFFFF4444U);
+    Box(266,146,8,8,0xFFFF4444U); Box(266,174,8,8,0xFFFF4444U);
+    Text(88,189,"A",MUTED); Text(277,189,"B",MUTED);
+    Text(168,208,"13 cm",MUTED); Text(282,157,"2 cm",MUTED);
+    Text(169,94,"FRONT",MUTED);
+    if(valid) {
+      float rad=appPositionStatus.angleDeg*0.01745329252f;
+      float dx=sinf(rad),dy=-cosf(rad);
+      int x=190+(int)(dx*54),y=164+(int)(dy*54);
+      PositionLine(190,164,x,y,GOOD);
+      PositionLine(x,y,x-(int)(dx*12+dy*7),y-(int)(dy*12-dx*7),GOOD);
+      PositionLine(x,y,x-(int)(dx*12-dy*7),y-(int)(dy*12+dx*7),GOOD);
+      Font(&Font24); (void)snprintf(line,sizeof(line),"%ld deg",(long)appPositionStatus.angleDeg);
+      Text(333,117,line,GOOD); Font(&Font12);
+      (void)snprintf(line,sizeof(line),"Q:%lu",(unsigned long)appPositionStatus.quality); Text(333,151,line,MUTED);
+      (void)snprintf(line,sizeof(line),"FIT:%lu us",(unsigned long)(appPositionStatus.residualNs/1000)); Text(333,169,line,MUTED);
+    } else Text(327,128,"NO DIRECTION",WARN);
+    Text(327,193,appPositionStatus.calibration==2 ? "CAL OK" :
+      (appPositionStatus.calibration==1 ? "CALIBRATING" : (appPositionStatus.calibration==3 ? "CAL FAILED":"UNCAL")),WARN);
+    if(valid) {
+      static const char *names[]={"FRONT","FRONT-RIGHT","RIGHT","BACK-RIGHT","BACK","BACK-LEFT","LEFT","FRONT-LEFT"};
+      Text(327,211,names[((appPositionStatus.angleDeg+22)/45)%8],GOOD);
+    }
+  }
+  (void)snprintf(line,sizeof(line),"E:%lu RX:%lu LV:%lu Q:%lu/%lu G:%lu B:%lu AT:%s",
+    (unsigned long)appPositionStatus.events,(unsigned long)appPositionStatus.received,
+    (unsigned long)appPositionStatus.inputLevel,(unsigned long)appPositionStatus.peakQuality[0],
+    (unsigned long)appPositionStatus.peakQuality[1],(unsigned long)appPositionStatus.gapResets,
+    (unsigned long)appPositionStatus.backlogResets,
+    appRangeStatus.audioTimeReady ? "OK":"WAIT");
+  Font(&Font12);Text(12,225,line,MUTED);
+  (void)snprintf(line,sizeof(line),"LAG:%lums DSP:%luus LCD:%luus",
+    (unsigned long)(appPositionStatus.lagMaxSamples/24U),
+    (unsigned long)appPositionStatus.dspMaxUs,(unsigned long)appPositionStatus.lcdMaxUs);
+  Text(12,239,line,MUTED);
+  if(!appRangeStatus.locked) Text(12,253,"WAIT FOR CLOCK SYNC",WARN);
+  else if(!AppRange_SettingsReady()) Text(12,253,"WAIT FOR SETTINGS ACK",WARN);
+  else if(appPositionStatus.calibration==1) {
+    (void)snprintf(line,sizeof(line),"CAL FRONT 50cm: %u/8 / KEEP SOURCE STILL",appPositionStatus.calibrationCount);
+    Text(12,253,line,WARN);
+  }
+  else if(valid) {
+    (void)snprintf(line,sizeof(line),"DIRECTION %ld DEG / Q %lu / STANDARD CHIRP",(long)appPositionStatus.angleDeg,(unsigned long)appPositionStatus.quality);
+    Text(12,253,line,GOOD);
+  } else Text(12,253,appPositionStatus.updatedMs && now-appPositionStatus.updatedMs<1500U ?
+    "UNCERTAIN / CHECK PLACEMENT + REFLECTIONS" : "PLAY POSITION CHIRP / WAITING FOR SOUND",WARN);
+}
+
 static void Draw(uint32_t now,AppPage page)
 {
   textBackground=BG; BSP_LCD_Clear(BG); Tabs(page);
@@ -270,13 +353,15 @@ static void Draw(uint32_t now,AppPage page)
     case APP_PAGE_STANDARD: if(diagnostics) Diagnostics(); else Standard(now); break;
     case APP_PAGE_CLAP: ClapDemo(); break;
     case APP_PAGE_WAVE: WaveLive(); break;
-    default: break; /* Reserved positioning page is intentionally blank. */
+    case APP_PAGE_POSITION: PositionPage(now); break;
+    default: break;
   }
 }
 static int Hit(uint16_t x,uint16_t y)
 {
   if(x>=480 || y>=272) return 0;
   if(y<32) return 1+x/120;
+  if(AppRange_Page()==APP_PAGE_POSITION) return APP_BOARD_ROLE==APP_BOARD_A && x>=340 && y>=74 && y<100 ? 10 : 0;
   if(AppRange_Page()==APP_PAGE_WAVE) return x>=338 && y>=211 && y<237 ? 9 : 0;
   if(AppRange_Page()!=APP_PAGE_STANDARD) return 0;
   if(diagnostics) return x>=356 && y>=241 ? 8 : 0;
@@ -310,6 +395,7 @@ static void Touch(uint32_t now)
   touchHeld=1;
   if(hit<=4) (void)AppRange_RequestPage((AppPage)(hit-1));
   else if(hit==5 || hit==6) (void)AppRange_AdjustTemperature(hit==5 ? -5 : 5);
+  else if(hit==10) { (void)AppRange_PositionCalibrate(); dirty=1; }
   else if(hit==9) { (void)AppRange_WaveRelock(); dirty=1; }
   else { diagnostics=(uint8_t)(hit==7); dirty=1; }
 }
@@ -345,7 +431,8 @@ void MicScope_Process(void)
     drawnTemperature=AppRange_Temperature(); dirty=1;
   }
   if(page!=drawnPage) { diagnostics=0; drawnPage=page; dirty=1; }
-  refresh=page==APP_PAGE_WAVE ? MIC_SCOPE_WAVE_REFRESH_MS : MIC_SCOPE_REFRESH_MS;
+  refresh=page==APP_PAGE_WAVE ? MIC_SCOPE_WAVE_REFRESH_MS :
+    (page==APP_PAGE_POSITION ? MIC_SCOPE_POSITION_REFRESH_MS : MIC_SCOPE_REFRESH_MS);
   period=(uint64_t)refresh*1000000ULL;
   synced=AppRange_MasterTime(&master);
   if(dirty) { framePending=0; presentAt=0; lastDraw=now-refresh; dirty=0; }
@@ -368,7 +455,14 @@ void MicScope_Process(void)
   } else if(now-lastDraw<refresh) return;
   if(!AppRange_DisplayReady()) return;
   hLtdcHandler.LayerCfg[0].FBStartAdress=backBuffer;
-  Draw(now,page); lastDraw=now; __DSB();
+  {
+    uint64_t drawStart=RangeClock_Now();
+    Draw(now,page); lastDraw=now; __DSB();
+    if(page==APP_PAGE_POSITION) {
+      uint32_t us=(uint32_t)((RangeClock_Now()-drawStart)/1000U);
+      if(us>appPositionStatus.lcdMaxUs) appPositionStatus.lcdMaxUs=us;
+    }
+  }
   if(synced) { framePending=1; return; }
   BSP_LCD_SetLayerAddress_NoReload(0,backBuffer); BSP_LCD_Reload(LCD_RELOAD_VERTICAL_BLANKING);
   backBuffer=backBuffer==FRAME_A ? FRAME_B : FRAME_A;

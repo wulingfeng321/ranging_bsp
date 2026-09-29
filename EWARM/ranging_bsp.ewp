@@ -1104,6 +1104,20 @@
         </file>
         <file>
           <name>$PROJ_DIR$\..\Core\Src\app_range.c</name>
+          <configuration>
+            <name>ranging_bsp</name>
+            <settings>
+              <name>ICCARM</name>
+              <archiveVersion>2</archiveVersion>
+              <data>
+                <version>35</version>
+                <wantNonLocal>1</wantNonLocal>
+                <debug>1</debug>
+                <option><name>CCOptLevel</name><state>3</state></option>
+                <option><name>CCOptLevelSlave</name><state>3</state></option>
+              </data>
+            </settings>
+          </configuration>
         </file>
         <file>
           <name>$PROJ_DIR$\..\Core\Src\app_capture.c</name>

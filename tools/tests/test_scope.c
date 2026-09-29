@@ -7,6 +7,7 @@ static int busy;
 int AppCapture_Busy(void) { return busy; }
 const char *AppCapture_Text(void) { return "CAP HELD / A USER"; }
 const char *AppCapture_Detail(void) { return ""; }
+#include "../../../../Utilities/Fonts/font8.c"
 #include "../../../../Utilities/Fonts/font12.c"
 #include "../../../../Utilities/Fonts/font16.c"
 #include "../../../../Utilities/Fonts/font24.c"
@@ -15,6 +16,7 @@ LTDC_HandleTypeDef hLtdcHandler;
 TestLtdc testLtdc;
 AppNetStatus appNetStatus;
 AppRangeStatus appRangeStatus;
+AppPositionStatus appPositionStatus;
 AppRangeArrival appRangeArrival;
 RangeDspDiagnostics rangeDspDiagnostics;
 static uint64_t masterClock;
@@ -27,6 +29,7 @@ static uint32_t pixels[272][480],fg,bg;
 static sFONT *font;
 static char screenText[8192];
 uint32_t HAL_GetTick(void) { return (uint32_t)(masterClock/1000000ULL)+localOffset; }
+uint64_t RangeClock_Now(void) { return masterClock+(uint64_t)localOffset*1000000ULL; }
 int AppRange_MasterTime(uint64_t *ns) { *ns=masterClock; return appRangeStatus.locked; }
 int AppRange_SyncElapsed(uint64_t *elapsed,uint64_t *local)
 { *local=masterClock/1000+localOffset*1000ULL; *elapsed=appRangeStatus.locked ? (masterClock>=43000000000ULL ? masterClock-43000000000ULL : masterClock)/1000 : 0; return appRangeStatus.locked; }
@@ -39,6 +42,7 @@ int AppRange_AdjustTemperature(int32_t step)
 { if(busy || !settingsReady) return 0; temp+=step; ++tempEdits; return 1; }
 uint64_t AppRange_WavePeriodPs(void) { return 2000000000ULL; }
 uint32_t AppRange_WaveCalMs(void) { return 5000; }
+int AppRange_PositionCalibrate(void) { return !busy; }
 int AppRange_WaveRelock(void) { return !busy; }
 static int waveFail;
 int AppRange_WaveRead(uint64_t at,int16_t *out,unsigned n)
@@ -167,10 +171,20 @@ int main(int argc,char **argv)
   masterClock+=201000000ULL; Draw(HAL_GetTick(),page);
   assert(strstr(screenText,"WAITING"));
   waveFail=0; Draw(HAL_GetTick(),page); assert(strstr(screenText,"P-P:"));
-  page=APP_PAGE_POSITION; Draw(HAL_GetTick(),page);
-  for(i=32*480;i<272*480;++i) assert(((uint32_t *)pixels)[i]==BG);
+  page=APP_PAGE_POSITION;
+  appPositionStatus.valid=1; appPositionStatus.angleDeg=45; appPositionStatus.quality=900;
+  appPositionStatus.updatedMs=HAL_GetTick();
+  Draw(HAL_GetTick(),page);
+  assert(strstr(screenText,"13") && !strstr(screenText,"SAVE:"));
   if(argc>1) Save(argv[1],"position");
-  touchFail=1; Touch(5000); assert(!touchReady && dirty);
+  /* POSITION is capped at 2Hz independently from WAVE's 20Hz. */
+  testLtdc.SRCR=0;page=APP_PAGE_POSITION;drawnPage=page;dirty=1;
+  Step(10020);assert(!framePending && presentAt==10500000000ULL);
+  Step(10470);assert(framePending);before=flips;
+  Step(10500);assert(flips==before+1);
+  testLtdc.SRCR=0;Step(10969);assert(!framePending);
+  Step(10970);assert(framePending);
+  touchFail=1; Touch(12000); assert(!touchReady && dirty);
   puts("PASS: actual LCD bounds, four pages, expiry, touch debounce, shared cadence, stale-frame discard");
   return 0;
 }

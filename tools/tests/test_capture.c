@@ -123,6 +123,11 @@ int main(int argc,char **argv)
     button=1;AppCapture_Process();tick+=41;AppCapture_Process();
     appCaptureSaveRequest=APP_CAPTURE_SAVE_REQUEST;AppCapture_Process();
     assert(state==IDLE && !hold && !appCaptureSaveRequest);
+    testPage=APP_PAGE_POSITION;
+    button=0;AppCapture_Process();tick+=41;AppCapture_Process();
+    button=1;AppCapture_Process();tick+=41;AppCapture_Process();
+    appCaptureSaveRequest=APP_CAPTURE_SAVE_REQUEST;AppCapture_Process();
+    assert(state==IDLE && !hold && !appCaptureSaveRequest);
     testPage=APP_PAGE_STANDARD;AppCapture_Process();assert(state==IDLE);
     button=0;AppCapture_Process();tick+=41;AppCapture_Process();
     button=1;AppCapture_Process();tick+=20;button=0;AppCapture_Process();tick+=50;AppCapture_Process();

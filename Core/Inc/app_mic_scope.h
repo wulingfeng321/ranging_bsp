@@ -5,6 +5,7 @@
 /* Whole frames use a shared master-clock cadence; acquisition runs continuously. */
 #define MIC_SCOPE_REFRESH_MS 200U
 #define MIC_SCOPE_WAVE_REFRESH_MS 50U
+#define MIC_SCOPE_POSITION_REFRESH_MS 500U
 #define MIC_SCOPE_PREPARE_MS 30U
 
 typedef enum

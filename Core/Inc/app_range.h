@@ -54,6 +54,15 @@ int AppRange_WaveRead(uint64_t presentMasterNs,int16_t *out,unsigned points);
 uint64_t AppRange_WavePeriodPs(void);
 uint32_t AppRange_WaveCalMs(void);
 int AppRange_WaveRelock(void);
+typedef struct {
+  int32_t angleDeg; /* 0 top/front, 90 right, clockwise */
+  uint32_t quality, residualNs, updatedMs, events, rejected;
+  uint32_t inputLevel, peakQuality[2], overruns, received, gapResets, backlogResets; /* Local diagnostics since page entry. */
+  uint32_t lagMaxSamples, dspMaxUs, lcdMaxUs; /* Position-only high water marks; lag at 24 kHz. */
+  uint8_t valid, calibration, calibrationCount; /* 0 uncal, 1 collecting, 2 ready, 3 failed */
+} AppPositionStatus;
+extern AppPositionStatus appPositionStatus;
+int AppRange_PositionCalibrate(void);
 void AppRange_Init(void);
 void AppRange_Process(void);
 /* Recorder transaction only: clears round counters and restarts synchronization. */

@@ -8,6 +8,7 @@
 #include "range_pps.h"
 #include "range_audio_time.h"
 #include "range_wave.h"
+#include "position_dsp.h"
 #if APP_RANGE_JOINT_PEAKS
 #include "range_peak_pair.h"
 #endif
@@ -39,8 +40,10 @@ static uint64_t batchFirstEventNs, batchLastEventNs;
 #define UI_REQUEST 13U
 #define UI_ACK 14U
 #define WAVE_CLOCK 15U
+#define POSITION_EVENT 16U
+#define POSITION_RESULT 17U
 #define AUDIO_RING (APP_AUDIO_SAMPLE_RATE == 48000U ? 32768U : 8192U)
-#define RANGE_WIRE_VERSION (APP_AUDIO_SAMPLE_RATE == 48000U ? 7U : 6U)
+#define RANGE_WIRE_VERSION (APP_AUDIO_SAMPLE_RATE == 48000U ? 9U : 8U)
 extern struct netif gnetif;
 AppRangeStatus appRangeStatus;
 AppRangeArrival appRangeArrival;
@@ -74,8 +77,44 @@ static RangeWaveTone waveTone;
 static uint64_t wavePeriodPs,waveOriginNs;
 static uint32_t waveCalMs,waveSendMs,waveSeenEpoch,waveLastBlock,waveClockId;
 static int16_t waveBlock[APP_AUDIO_HALF_FRAMES];
+AppPositionStatus appPositionStatus;
+static PositionDetector positionDetector;
+static volatile int16_t positionRing[2][POS_RING];
+static uint64_t positionCursor,positionLocal[2],positionRemote[2];
+static uint32_t positionEpoch,positionLocalQ,positionRemoteQ,positionRemoteId;
+static uint32_t positionEventId,positionResultId,positionSendMs,positionEventMs;
+static uint32_t positionReceivedId,positionSearchLeft;
+static uint8_t positionHaveLocal,positionHaveRemote;
+static double positionBias[3],positionCalSum[3],positionCalSquare[3];
+static void PositionReset(void)
+{
+  uint32_t mask=__get_PRIMASK();
+  __disable_irq(); positionCursor=audioCount/2; positionEpoch=audioEpoch; __set_PRIMASK(mask);
+  positionHaveLocal=positionHaveRemote=0;
+  positionEventId=positionResultId=positionRemoteId=positionReceivedId=0;
+  memset(&appPositionStatus,0,sizeof(appPositionStatus));
+  memset(positionBias,0,sizeof(positionBias));
+  memset(positionCalSum,0,sizeof(positionCalSum));
+  memset(positionCalSquare,0,sizeof(positionCalSquare));
+  positionSearchLeft=0;
+  if(!positionDetector.energy) Position_Init(&positionDetector);
+  else Position_ResetPeaks(&positionDetector);
+}
+static void PositionRestartAudio(unsigned gap)
+{
+  uint32_t mask=__get_PRIMASK();
+  __disable_irq();positionCursor=audioCount/2;positionEpoch=audioEpoch;__set_PRIMASK(mask);
+  positionSearchLeft=0;Position_ResetPeaks(&positionDetector);
+  positionHaveLocal=positionHaveRemote=0;positionEventId=0;
+  ++appPositionStatus.overruns;
+  if(gap) ++appPositionStatus.gapResets;else ++appPositionStatus.backlogResets;
+  appPositionStatus.valid=0;
+}
+static void PositionProcess(void);
+static void PositionNetwork(uint32_t now);
 static void WaveReset(void)
 {
+  PositionReset();
   RangeWave_Reset(&waveTone); wavePeriodPs=waveOriginNs=0; waveCalMs=0;
   waveClockId=0; waveSendMs=HAL_GetTick()-250U;
 }
@@ -197,6 +236,7 @@ static int RequestUi(uint32_t kind,uint32_t value)
   if(APP_BOARD_ROLE==APP_BOARD_A) {
     ++uiRevision; if(!uiRevision) ++uiRevision;
     ApplyUi(kind==0 ? (AppPage)value : uiPage,kind==1 ? (int32_t)value-100 : temperature);
+    if(kind==3) appPositionStatus.calibration=1;
     uiLastSend=HAL_GetTick()-250U;
   } else {
     uiPendingId=++uiRequestId; if(!uiPendingId) uiPendingId=++uiRequestId;
@@ -211,6 +251,8 @@ int AppRange_RequestPage(AppPage page)
   if(page==uiPage) return 1;
   return RequestUi(0,(uint32_t)page);
 }
+int AppRange_PositionCalibrate(void)
+{ return uiPage==APP_PAGE_POSITION ? RequestUi(3,0) : 0; }
 int AppRange_WaveRelock(void)
 { return uiPage==APP_PAGE_WAVE ? RequestUi(2,0) : 0; }
 uint64_t AppRange_WavePeriodPs(void) { return wavePeriodPs; }
@@ -290,14 +332,15 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
     return;
   }
   if(APP_BOARD_ROLE==APP_BOARD_A && type==UI_REQUEST) {
-    if(!id || x>2 || (x==2 && (y || uiPage!=APP_PAGE_WAVE)) || (x==0 && y>APP_PAGE_POSITION) ||
+    if(!id || x>3 || (x==3 && (y || uiPage!=APP_PAGE_POSITION)) || (x==2 && (y || uiPage!=APP_PAGE_WAVE)) || (x==0 && y>APP_PAGE_POSITION) ||
        (x==1 && (y>600 || y%5))) goto reject;
     if(!uiLastRequest || (id!=uiLastRequest && id-uiLastRequest<0x80000000UL)) {
       /* Request values are absolute, so duplicates cannot double-step temperature. */
       uiLastRequest=id;
-      if(x==2 || (x==0 && uiPage!=(AppPage)y) || (x==1 && temperature!=(int32_t)y-100)) {
+      if(x>=2 || (x==0 && uiPage!=(AppPage)y) || (x==1 && temperature!=(int32_t)y-100)) {
         ++uiRevision; if(!uiRevision) ++uiRevision;
         ApplyUi(x==0 ? (AppPage)y : uiPage,x==1 ? (int32_t)y-100 : temperature);
+        if(x==3) appPositionStatus.calibration=1;
       }
     }
     uiLastSend=now-250U;
@@ -321,6 +364,31 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
     if(waveClockId && (id==waveClockId || id-waveClockId>=0x80000000UL)) return;
     waveClockId=id; wavePeriodPs=x; waveOriginNs=y; waveCalMs=(uint32_t)z;
     return;
+  }
+  if(type==POSITION_EVENT || type==POSITION_RESULT) {
+    uint64_t current;
+    if(uiPage!=APP_PAGE_POSITION || !AppRange_SettingsReady() ||
+       !AppRange_MasterTime(&current) || G32(bytes+72)!=uiRevision ||
+       epoch!=(APP_BOARD_ROLE==APP_BOARD_A ? peerEpoch : syncEpoch)) goto reject;
+    if(type==POSITION_EVENT && APP_BOARD_ROLE==APP_BOARD_A) {
+      if(z>1000 || !x || !y || x>current || y>current ||
+         current-x>1000000000ULL || current-y>1000000000ULL ||
+         (x>y ? x-y:y-x)>175000) goto reject;
+      if(positionRemoteId && (id==positionRemoteId || id-positionRemoteId>=0x80000000UL)) return;
+      positionRemoteId=id; positionRemote[0]=x; positionRemote[1]=y;
+      positionRemoteQ=(uint32_t)z; positionHaveRemote=1; ++appPositionStatus.received; return;
+    }
+    if(type==POSITION_RESULT && APP_BOARD_ROLE==APP_BOARD_B) {
+      if(x>=360 || y>1000 || z>1 || G64(bytes+56)>1000000 || G64(bytes+64)>56 || (G64(bytes+64)&15)>8) goto reject;
+      if(positionReceivedId && (id==positionReceivedId || id-positionReceivedId>=0x80000000UL)) return;
+      positionReceivedId=id; ++appPositionStatus.received; appPositionStatus.angleDeg=(int32_t)x;
+      appPositionStatus.quality=(uint32_t)y; appPositionStatus.valid=(uint8_t)z;
+      appPositionStatus.residualNs=(uint32_t)G64(bytes+56);
+      appPositionStatus.calibration=(uint8_t)(G64(bytes+64)>>4);
+      appPositionStatus.calibrationCount=(uint8_t)(G64(bytes+64)&15);
+      appPositionStatus.updatedMs=now; return;
+    }
+    goto reject;
   }
   /* Clock traffic is independent of UI configuration. Every measurement packet
    * carries the setting revision so delayed results cannot cross a page/temp edit. */
@@ -473,6 +541,14 @@ void AppRange_Audio(const volatile int16_t *pcm, uint32_t frames)
   {
     int16_t value=pcm[i*2+APP_RANGE_CHANNEL];
     audioRing[(uint32_t)(base+i)&(AUDIO_RING-1)] = value;
+  }
+  if(uiPage==APP_PAGE_POSITION && APP_AUDIO_SAMPLE_RATE==48000U) {
+    for(i=0;i<frames;i+=2) {
+      uint32_t at=(uint32_t)((base+i)/2)&(POS_RING-1U);
+      int32_t l0=pcm[2*i],l1=pcm[2*i+2],r0=pcm[2*i+1],r1=pcm[2*i+3];
+      positionRing[0][at]=(int16_t)((l0+l1)/2);
+      positionRing[1][at]=(int16_t)((r0+r1)/2);
+    }
   }
   audioCount+=frames; audioAnchor=now; ++audioBlocks;
   epoch=audioEpoch;
@@ -652,7 +728,16 @@ static void WaveObserve(void)
   count=audioCount; anchor=audioAnchor; blocks=audioBlocks; epoch=audioEpoch;
   __set_PRIMASK(mask);
   if(waveSeenEpoch!=epoch) {
-    waveSeenEpoch=epoch; WaveReset(); RangeAudioTime_Reset(&audioTime);
+    waveSeenEpoch=epoch;
+    if(uiPage==APP_PAGE_POSITION) {
+      PositionRestartAudio(1);
+      /* Preserve a requested calibration through audio warm-up/recovery. */
+      memset(positionBias,0,sizeof(positionBias));
+      memset(positionCalSum,0,sizeof(positionCalSum));memset(positionCalSquare,0,sizeof(positionCalSquare));
+      appPositionStatus.calibrationCount=0;
+      if(appPositionStatus.calibration!=1) appPositionStatus.calibration=0;
+    } else WaveReset();
+    RangeAudioTime_Reset(&audioTime);
     appRangeStatus.audioTimeReady=0;
   }
   if(blocks==waveLastBlock || !anchor || count<APP_AUDIO_HALF_FRAMES) return;
@@ -661,7 +746,7 @@ static void WaveObserve(void)
   appRangeStatus.audioTimeReady=audioTime.ready;
   appRangeStatus.audioJitterNs=audioTime.jitterNs;
   if(audioTime.ready) appRangeStatus.samplePeriodPs=(uint32_t)(audioTime.periodNs*1000.0+0.5);
-  if(APP_BOARD_ROLE!=APP_BOARD_A || wavePeriodPs || !appRangeStatus.locked ||
+  if(uiPage!=APP_PAGE_WAVE || APP_BOARD_ROLE!=APP_BOARD_A || wavePeriodPs || !appRangeStatus.locked ||
      !AppRange_SettingsReady() || !audioTime.ready) return;
   /* LCD work may span several DMA blocks. Consume retained blocks rather
    * than treating a missed main-loop observation as missing audio. */
@@ -738,10 +823,148 @@ int AppRange_WaveRead(uint64_t presentMasterNs,int16_t *out,unsigned points)
   }
 }
 
+static void PositionProcess(void)
+{
+  uint64_t count,anchorSample,budgetStart=RangeClock_Now();uint32_t epoch,mask,n,k,j;
+  static int16_t clip[2][POS_N];double at[2];uint32_t quality=0;
+  if(APP_AUDIO_SAMPLE_RATE!=48000U || !AppRange_SettingsReady() ||
+     !appRangeStatus.locked || !audioTime.ready) return;
+  mask=__get_PRIMASK();__disable_irq();count=audioCount/2;epoch=audioEpoch;__set_PRIMASK(mask);
+  if(epoch!=positionEpoch || (count>positionCursor && count-positionCursor>POS_RING-768U)) {
+    PositionRestartAudio(epoch!=positionEpoch);return;
+  }
+  if(count>positionCursor && count-positionCursor>appPositionStatus.lagMaxSamples)
+    appPositionStatus.lagMaxSamples=(uint32_t)(count-positionCursor);
+  anchorSample=audioTime.sample[(audioTime.next+31U)%32U];
+  for(n=0;n<64 && positionCursor+POS_N<=count;++n,++positionCursor) {
+    float q[2];int found;
+    if(n && RangeClock_Now()-budgetStart>=1500000ULL) break;
+    /* A match at the end of a fine window must finish, not be reset by the
+     * next coarse gate. This also holds across time-budget yields. */
+    if(!positionSearchLeft && positionDetector.active) positionSearchLeft=64;
+    if(!positionSearchLeft) {
+      float energy,score[2];
+      for(k=0;k<2;++k) {
+        score[k]=Position_CoarseRing(&positionDetector,positionRing[k],
+                                    (uint32_t)positionCursor,POS_RING-1U,&energy);
+        /* sqrt is only needed on a new maximum, not on every scan start. */
+        if(energy>(float)appPositionStatus.inputLevel*appPositionStatus.inputLevel)
+          appPositionStatus.inputLevel=(uint32_t)(sqrtf(energy)+0.5f);
+      }
+      __DMB();mask=__get_PRIMASK();__disable_irq();
+      { uint64_t newest=audioCount/2;__set_PRIMASK(mask);
+        if(epoch!=audioEpoch || newest-positionCursor>=POS_RING) {
+          PositionRestartAudio(epoch!=audioEpoch);return;
+        }
+      }
+      if(score[0]<0.08f && score[1]<0.08f) { positionCursor+=7;continue; }
+      positionSearchLeft=96;Position_ResetPeaks(&positionDetector);
+      /* Rewind 16 starts then refine all starts; preserve both mic peaks. */
+      if(positionCursor>=16) positionCursor-=16;
+      else positionCursor=0;
+      if(positionCursor) --positionCursor; /* for-loop increments before retry */
+      continue;
+    }
+    --positionSearchLeft;
+    for(k=0;k<2;++k)
+      for(j=0;j<POS_N;++j) clip[k][j]=positionRing[k][(uint32_t)(positionCursor+j)&(POS_RING-1U)];
+    for(k=0;k<2;++k) {
+      uint32_t peak;
+      q[k]=Position_Score(&positionDetector,clip[k]);
+      if(q[k]*1000000.0f>(float)appPositionStatus.peakQuality[k]*appPositionStatus.peakQuality[k]) {
+        peak=(uint32_t)(1000*sqrtf(q[k]));if(peak>1000) peak=1000;
+        if(peak>appPositionStatus.peakQuality[k]) appPositionStatus.peakQuality[k]=peak;
+      }
+    }
+    __DMB();mask=__get_PRIMASK();__disable_irq();
+    { uint64_t newest=audioCount/2;__set_PRIMASK(mask);
+      if(epoch!=audioEpoch || newest-positionCursor>=POS_RING) { PositionRestartAudio(epoch!=audioEpoch);return; }
+    }
+    found=Position_Peak(&positionDetector,positionCursor,q[0],q[1],at,&quality);
+    if(!found) continue;
+    positionSearchLeft=0;positionCursor+=4800U;
+    if(found<0) { ++appPositionStatus.rejected;return; }
+    for(k=0;k<2;++k) {
+      double stamp=audioTime.anchorNs+(2*at[k]-(double)anchorSample)*audioTime.periodNs;
+      if(APP_BOARD_ROLE==APP_BOARD_B) stamp=stamp-syncModel.offset-syncModel.slope*(stamp-syncModel.origin);
+      positionLocal[k]=(uint64_t)(stamp+0.5);
+    }
+    ++appPositionStatus.events;positionHaveLocal=1;positionLocalQ=quality;
+    positionEventId=++sequence;positionEventMs=HAL_GetTick();positionSendMs=positionEventMs-200U;return;
+  }
+}
+static void PositionNetwork(uint32_t now)
+{
+  if(uiPage!=APP_PAGE_POSITION || !AppRange_SettingsReady() || !appRangeStatus.locked) {
+    appPositionStatus.valid=0; return;
+  }
+  if(now-appPositionStatus.updatedMs>1500U) appPositionStatus.valid=0;
+  if(APP_BOARD_ROLE==APP_BOARD_B) {
+    if(positionEventId && now-positionEventMs<1000U && now-positionSendMs>=150U) {
+      positionSendMs=now;
+      Send(POSITION_EVENT,positionEventId,syncEpoch,positionLocal[0],positionLocal[1],positionLocalQ,0,0);
+    }
+  } else {
+    if(positionHaveLocal && positionHaveRemote) {
+      int64_t delta=(int64_t)positionRemote[0]-(int64_t)positionLocal[0];
+      if(delta>2000000) positionHaveLocal=0;
+      else if(delta< -2000000) positionHaveRemote=0;
+      else {
+        double t[4]; int32_t angle=0; uint32_t residual=0; unsigned i;
+        for(i=0;i<2;++i) { t[i]=(double)((int64_t)positionLocal[i]-(int64_t)positionLocal[0]);
+          t[i+2]=(double)((int64_t)positionRemote[i]-(int64_t)positionLocal[0]); }
+        if(appPositionStatus.calibration==1) {
+          /* Operator places source 0.5m from rectangle centre on the TOP axis.
+           * Account for actual near-field path differences, not zero all pairs. */
+          double sound=331.3+0.0606*temperature;
+          double lower=(sqrt(0.065*0.065+0.51*0.51)-sqrt(0.065*0.065+0.49*0.49))*1e9/sound;
+          if(positionLocalQ>=700 && positionRemoteQ>=700) {
+            for(i=0;i<3;++i) {
+              double expected=i==1 ? 0 : lower;
+              double error=t[i+1]-expected;
+              positionCalSum[i]+=error; positionCalSquare[i]+=error*error;
+            }
+            ++appPositionStatus.calibrationCount;
+            if(appPositionStatus.calibrationCount==8) {
+              appPositionStatus.calibration=2;
+              for(i=0;i<3;++i) {
+                double mean=positionCalSum[i]/8;
+                if(positionCalSquare[i]/8-mean*mean>100000000.0 || fabs(mean)>80000)
+                  appPositionStatus.calibration=3;
+                positionBias[i]=mean;
+              }
+              if(appPositionStatus.calibration==3) memset(positionBias,0,sizeof(positionBias));
+            }
+          }
+          appPositionStatus.valid=0;
+        } else {
+          for(i=0;i<3;++i) t[i+1]-=positionBias[i];
+          appPositionStatus.valid=(uint8_t)Position_Solve(t,331.3f+0.0606f*temperature,&angle,&residual);
+        }
+        appPositionStatus.angleDeg=angle; appPositionStatus.residualNs=residual;
+        appPositionStatus.quality=positionLocalQ<positionRemoteQ ? positionLocalQ:positionRemoteQ;
+        appPositionStatus.updatedMs=now;
+        if(!appPositionStatus.valid) ++appPositionStatus.rejected;
+        positionResultId=++sequence; positionSendMs=now-200U;
+        positionHaveLocal=positionHaveRemote=0;
+      }
+    }
+    if(positionResultId && now-appPositionStatus.updatedMs<1200U && now-positionSendMs>=150U) {
+      positionSendMs=now;
+      Send(POSITION_RESULT,positionResultId,peerEpoch,(uint32_t)appPositionStatus.angleDeg,
+        appPositionStatus.quality,appPositionStatus.valid,appPositionStatus.residualNs,
+        ((uint32_t)appPositionStatus.calibration<<4)|appPositionStatus.calibrationCount);
+    }
+  }
+}
+
 int AppRange_DisplayReady(void)
 {
   uint64_t count;
   uint32_t mask;
+  /* Bounded POSITION slices let the 2 Hz UI run even during backlog or an
+   * outstanding settings ACK. Otherwise the user sees a stale waiting frame. */
+  if(uiPage==APP_PAGE_POSITION) return 1;
   if(!clockReady || !pcb || AppCapture_Busy() || !RangingEnabled()) return 1;
   mask=__get_PRIMASK(); __disable_irq();
   count=audioCount;
@@ -881,11 +1104,14 @@ void AppRange_Process(void)
     if(RangingEnabled()) AudioProcess(); /* Never run DSP in the DMA ISR. */
     else {
       uint32_t mask=__get_PRIMASK();
-      if(uiPage==APP_PAGE_WAVE) WaveObserve();
+      if(uiPage==APP_PAGE_WAVE || uiPage==APP_PAGE_POSITION) WaveObserve();
+      if(uiPage==APP_PAGE_POSITION) PositionProcess();
       __disable_irq(); readSample=audioCount; seenEpoch=audioEpoch; __set_PRIMASK(mask);
       haveWindow=0; lastDetection=0;
     }
     finish=RangeClock_Now(); elapsed=finish-start; dspBusyNs+=elapsed;
+    if(uiPage==APP_PAGE_POSITION && elapsed/1000>appPositionStatus.dspMaxUs)
+      appPositionStatus.dspMaxUs=(uint32_t)(elapsed/1000);
     if(elapsed/1000>appRangeStatus.dspMaxUs) appRangeStatus.dspMaxUs=(uint32_t)(elapsed/1000);
     if(!dspPeriodStart) dspPeriodStart=start;
     if(finish-dspPeriodStart>=1000000000ULL) {
@@ -913,6 +1139,7 @@ void AppRange_Process(void)
     return;
   }
   UiProcess(now);
+  PositionNetwork(now);
   if(APP_BOARD_ROLE==APP_BOARD_A && uiPage==APP_PAGE_WAVE && appRangeStatus.locked &&
      AppRange_SettingsReady() && now-waveSendMs>=250U) {
     waveSendMs=now;
