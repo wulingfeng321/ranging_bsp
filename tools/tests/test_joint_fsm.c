@@ -22,7 +22,7 @@ static void InjectPeaks(uint32_t id,uint64_t stamp,const RangePeaks *peaks)
 int main(void)
 {
   RangePeaks remote; uint64_t stamp; unsigned i,k;
-  AppRange_Init(); appNetStatus.online=1; AppRange_Process();
+  AppRange_Init(); appNetStatus.online=1; AppRange_Process(); uiKnown=1; uiAckRevision=uiRevision;
   appRangeStatus.locked=1; peerEpoch=7; syncEpoch=7;
   detectedPeaks=OnePeak(0,950); remote=OnePeak(0,950);
   stamp=clockNs-200000000ULL;
@@ -65,10 +65,10 @@ int main(void)
     lastSyncMs=HAL_GetTick(); lastSyncNs=clockNs;
     AppRange_Process(); assert(sent[5]==PEAK_EVENT && G32(sent+24)==pendingEventId);
     {
-      uint8_t original[72]; uint32_t id=pendingEventId;
-      memcpy(original,sent,72);
+      uint8_t original[WIRE_SIZE]; uint32_t id=pendingEventId;
+      memcpy(original,sent,WIRE_SIZE);
       clockNs+=200000000; lastSyncMs=HAL_GetTick(); AppRange_Process();
-      assert(!memcmp(original,sent,72));
+      assert(!memcmp(original,sent,WIRE_SIZE));
       Inject(ACK,id,syncEpoch,EVENT,0,0); assert(pendingEventId==id);
       Inject(ACK,id,syncEpoch,PEAK_EVENT,0,0); assert(!pendingEventId);
     }

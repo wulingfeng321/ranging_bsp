@@ -15,7 +15,11 @@ foreach ($role in 1,2) {
     # Cortex-M's fixed 32-bit SDRAM addresses are not dereferenced by this host test.
     $commands += "cl $common /wd4312 /Itools/tests/scope_stubs /ICore/Inc tools/tests/test_scope.c /Fe`"$out/scope$role.exe`""
     $commands += 'if errorlevel 1 exit /b 1'
-    $commands += "`"$out/scope$role.exe`" `"$out/scope$role.ppm`""
+    $commands += "`"$out/scope$role.exe`" `"$out/scope$role`""
+    $commands += 'if errorlevel 1 exit /b 1'
+    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_ui_control.c Core/Src/range_dsp.c Core/Src/range_sync.c /Fe`"$out/ui$role.exe`""
+    $commands += 'if errorlevel 1 exit /b 1'
+    $commands += "`"$out/ui$role.exe`""
     $commands += 'if errorlevel 1 exit /b 1'
     $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_master_time.c Core/Src/range_dsp.c Core/Src/range_sync.c /Fe`"$out/master$role.exe`""
     $commands += 'if errorlevel 1 exit /b 1'

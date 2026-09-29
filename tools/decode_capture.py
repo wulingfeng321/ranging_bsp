@@ -19,6 +19,7 @@ SCHEMAS = {
     "pair": ["event_a_id", "event_b_id", "a_master_ns", "b_master_ns", "outcome_1_ok_2_ambiguous",
              "reason", "best_ns", "runner_ns", "best_score", "runner_score", "best_span_ns", "runner_span_ns",
              "best_a", "best_b", "runner_a", "runner_b"],
+    "ui": ["tick_ms", "page", "temperature_deci_c", "settings_revision"],
     "status": ["tick_ms", "events", "event_rx", "results", "ambiguous", "inconsistent", "distance_mm",
                "result_delta_us", "valid", "batch_stage", "batch_count", "batch_used", "batch_span_mm",
                "sync_error_ns", "sample_period_ps", "audio_drops", "audio_gaps", "audio_overruns",

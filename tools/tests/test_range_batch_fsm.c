@@ -5,7 +5,7 @@
 int main(void)
 {
   unsigned i;
-  AppRange_Init(); appNetStatus.online=1; AppRange_Process();
+  AppRange_Init(); appNetStatus.online=1; AppRange_Process(); uiKnown=1; uiAckRevision=uiRevision;
   appRangeStatus.locked=1;
   if(APP_BOARD_ROLE==APP_BOARD_A) {
     peerEpoch=7;

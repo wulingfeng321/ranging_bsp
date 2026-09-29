@@ -28,6 +28,25 @@ typedef struct {
   RangePairDiag pairFailure; /* Latched until reset/session change or next failure. */
 } AppRangeStatus;
 extern AppRangeStatus appRangeStatus;
+typedef enum { APP_PAGE_STANDARD, APP_PAGE_CLAP, APP_PAGE_WAVE, APP_PAGE_POSITION } AppPage;
+/* Main-loop owned UI state. A is authoritative; B requests changes reliably.
+ * Temperature is in 0.1 C, volatile across reboot, restricted to -10..50 C.
+ * Pulse times are the strongest LOCAL candidate's three pulse starts, NOT
+ * the selected cross-board pair. All buffers are owned by app_range. */
+typedef struct {
+  uint64_t localUs[3], syncUs[3];
+  uint32_t eventId;
+  uint8_t valid;
+} AppRangeArrival;
+extern AppRangeArrival appRangeArrival;
+AppPage AppRange_Page(void);
+int32_t AppRange_Temperature(void);
+int AppRange_SettingsReady(void);
+int AppRange_RequestPage(AppPage page);
+int AppRange_AdjustTemperature(int32_t stepDeciC);
+/* Common counter starts at an A-clock second boundary after lock; zero while
+ * unlocked or awaiting the common origin. Local clock never resets. */
+int AppRange_SyncElapsed(uint64_t *elapsedUs, uint64_t *localUs);
 void AppRange_Init(void);
 void AppRange_Process(void);
 /* Recorder transaction only: clears round counters and restarts synchronization. */

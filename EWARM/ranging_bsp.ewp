@@ -1260,6 +1260,9 @@
     <group>
       <name>Components</name>
       <file>
+        <name>$PROJ_DIR$\..\..\..\Drivers\BSP\Components\ft5336\ft5336.c</name>
+      </file>
+      <file>
         <name>$PROJ_DIR$\..\..\..\Drivers\BSP\Components\rk043fn48h\rk043fn48h.h</name>
       </file>
       <file>

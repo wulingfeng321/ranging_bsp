@@ -13,7 +13,8 @@ void AppCapture_Audio(const volatile int16_t *p,uint32_t n,uint64_t c,uint64_t t
 { (void)p;(void)n;(void)c;(void)t;(void)e; }
 void AppCapture_Trigger(void) {}
 void AppCapture_Log(const char *format,...) { (void)format; }
-int AppCapture_Busy(void) { return 0; }
+static int captureBusy;
+int AppCapture_Busy(void) { return captureBusy; }
 #if APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_LEGACY
 #if APP_AUDIO_SAMPLE_RATE == 48000U
 #include "range_template_48k.h"
@@ -34,9 +35,9 @@ uint32_t rangeTxStampSerial;
 static uint64_t clockNs=10000000000ULL;
 static struct udp_pcb fakePcb;
 static int balance, displays;
-static uint8_t sent[72];
+static uint8_t sent[WIRE_SIZE];
 static uint64_t testPayloadU,testPayloadV;
-static uint32_t tickAdvanceMs;
+static uint32_t tickAdvanceMs, testRevision;
 uint32_t HAL_GetTick(void)
 {
   uint32_t tick=(uint32_t)(clockNs/1000000ULL);
@@ -68,23 +69,23 @@ void udp_recv(struct udp_pcb *p,void (*f)(void *,struct udp_pcb *,struct pbuf *,
 { (void)p;(void)f;(void)a; }
 err_t udp_sendto(struct udp_pcb *p,struct pbuf *b,const ip_addr_t *a,uint16_t port)
 {
-  (void)p;(void)a;assert(port==5001 && b->tot_len==72);
-  memcpy(sent,b->bytes,72);rangeTxTimestamp=clockNs;++rangeTxStampSerial;return 0;
+  (void)p;(void)a;assert(port==5001 && b->tot_len==WIRE_SIZE);
+  memcpy(sent,b->bytes,WIRE_SIZE);rangeTxTimestamp=clockNs;++rangeTxStampSerial;return 0;
 }
 static void Inject(uint8_t type,uint32_t id,uint32_t epoch,uint64_t x,uint64_t y,uint64_t z)
 {
-  struct pbuf *p=pbuf_alloc(0,72,0);
-  memset(p->bytes,0,72);memcpy(p->bytes,"RAN2",4);
-  p->bytes[4]=RANGE_WIRE_VERSION;p->bytes[5]=type;p->bytes[6]=APP_PEER_ROLE;p->bytes[7]=72;
+  struct pbuf *p=pbuf_alloc(0,WIRE_SIZE,0);
+  memset(p->bytes,0,WIRE_SIZE);memcpy(p->bytes,"RAN2",4);
+  p->bytes[4]=RANGE_WIRE_VERSION;p->bytes[5]=type;p->bytes[6]=APP_PEER_ROLE;p->bytes[7]=WIRE_SIZE;
   P64(p->bytes+8,222);P64(p->bytes+16,111);P32(p->bytes+24,id);P32(p->bytes+28,epoch);
   P64(p->bytes+32,x);P64(p->bytes+40,y);P64(p->bytes+48,z);
-  P64(p->bytes+56,testPayloadU);P64(p->bytes+64,testPayloadV);
+  P64(p->bytes+56,testPayloadU);P64(p->bytes+64,testPayloadV);P32(p->bytes+72,testRevision ? testRevision : uiRevision);
   rangeRxTimestamp=clockNs;Receive(NULL,pcb,p,&peer,5001);assert(balance==0);
 }
 int main(void)
 {
   unsigned i;
-  AppRange_Init();appNetStatus.online=1;AppRange_Process();
+  AppRange_Init();appNetStatus.online=1;AppRange_Process(); uiKnown=1; uiAckRevision=uiRevision;
   if(APP_BOARD_ROLE==APP_BOARD_A)
   {
     Inject(SYNC_STATE,1,7,1,1000,0);assert(appRangeStatus.locked);
@@ -155,6 +156,7 @@ int main(void)
     assert(AppRange_DisplayReady());
     AppRange_AudioError();AudioProcess();assert(appRangeStatus.audioDrops==1);
     assert(appRangeStatus.audioGapDrops==1 && appRangeStatus.audioOverruns==0);
+    appNetStatus.online=1; uiKnown=1; uiAckRevision=uiRevision;
     audioCount+=6400;assert(!AppRange_DisplayReady());AudioProcess();
     assert(appRangeStatus.audioDrops==2 && appRangeStatus.audioGapDrops==1 &&
            appRangeStatus.audioOverruns==1 && !appRangeStatus.pairDeltaValid);

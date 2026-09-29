@@ -22,7 +22,7 @@ static uint64_t batchFirstEventNs, batchLastEventNs;
 #include "lwip/etharp.h"
 #include <string.h>
 
-#define WIRE_SIZE 72U
+#define WIRE_SIZE 76U
 #define SYNC_REQ 1U
 #define SYNC_RESP 2U
 #define SYNC_FOLLOW 3U
@@ -34,10 +34,20 @@ static uint64_t batchFirstEventNs, batchLastEventNs;
 #define PEAK_EVENT 9U
 #define PEAK_STATE 10U
 #define PEAK_DIAG 11U
+#define UI_STATE 12U
+#define UI_REQUEST 13U
+#define UI_ACK 14U
 #define AUDIO_RING (APP_AUDIO_SAMPLE_RATE == 48000U ? 32768U : 8192U)
-#define RANGE_WIRE_VERSION (APP_AUDIO_SAMPLE_RATE == 48000U ? 3U : 2U)
+#define RANGE_WIRE_VERSION (APP_AUDIO_SAMPLE_RATE == 48000U ? 5U : 4U)
 extern struct netif gnetif;
 AppRangeStatus appRangeStatus;
+AppRangeArrival appRangeArrival;
+static AppPage uiPage = APP_PAGE_STANDARD;
+static int32_t temperature = APP_TEMPERATURE_DECI_C;
+static uint32_t uiRevision=1, uiAckRevision, uiLastSend;
+static uint32_t uiRequestId, uiPendingId, uiRequestKind, uiRequestValue, uiLastRequest;
+static uint8_t uiKnown;
+static uint64_t syncOriginNs, uiPeerSession;
 static struct udp_pcb *pcb;
 static ip_addr_t peer;
 static RangeSync syncModel;
@@ -107,6 +117,7 @@ static uint64_t Send(uint8_t type, uint32_t id, uint32_t epoch,
   bytes[5]=type; P64(bytes+8,AppNet_LocalSession()); P64(bytes+16,AppNet_PeerSession());
   P32(bytes+24,id); P32(bytes+28,epoch);
   P64(bytes+32,x); P64(bytes+40,y); P64(bytes+48,z); P64(bytes+56,u); P64(bytes+64,v);
+  P32(bytes+72,uiRevision);
   p=pbuf_alloc(PBUF_TRANSPORT,WIRE_SIZE,PBUF_RAM);
   if (!p) return 0;
   err=pbuf_take(p,bytes,WIRE_SIZE); stampSerial=rangeTxStampSerial;
@@ -117,6 +128,7 @@ static uint64_t Send(uint8_t type, uint32_t id, uint32_t epoch,
 
 static void ClearMeasurements(void)
 {
+  memset(&appRangeArrival,0,sizeof(appRangeArrival));
 #if APP_RANGE_STATISTICS
   RangeBatch_Reset(&batch);
   appRangeStatus.batchStage=0; appRangeStatus.batchCount=0;
@@ -136,10 +148,81 @@ static void ClearMeasurements(void)
 
 static void Unlock(void)
 {
+  syncOriginNs=0;
   RangePps_Update(NULL,0);
   RangeSync_Reset(&syncModel); appRangeStatus.locked=0;
   pendingRequest=0; haveResponse=0; ++syncEpoch;
   ClearMeasurements();
+}
+
+AppPage AppRange_Page(void) { return uiPage; }
+int32_t AppRange_Temperature(void) { return temperature; }
+int AppRange_SettingsReady(void)
+{
+  return appNetStatus.online && !uiPendingId &&
+    (APP_BOARD_ROLE==APP_BOARD_A ? uiAckRevision==uiRevision : uiKnown);
+}
+static int RangingEnabled(void)
+{ return uiPage==APP_PAGE_STANDARD && AppRange_SettingsReady(); }
+
+/* Changing mode/temperature discards detector backlog and all old results,
+ * but preserves the clock fit, PCM recorder and synchronization counter. */
+static void ApplyUi(AppPage page,int32_t temp)
+{
+  uint32_t mask=__get_PRIMASK();
+  uiPage=page; temperature=temp;
+  ClearMeasurements();
+  appRangeStatus.quality=0; appRangeStatus.eventQuality=0;
+  appRangeStatus.resultIsStat=0; appRangeStatus.audioTimeReady=0;
+  RangeAudioTime_Reset(&audioTime);
+  __disable_irq(); readSample=audioCount; seenEpoch=audioEpoch; __set_PRIMASK(mask);
+  haveWindow=0; lastDetection=0;
+  AppCapture_Log("ui,%lu,%u,%ld,%lu\n",(unsigned long)HAL_GetTick(),
+    (unsigned)page,(long)temp,(unsigned long)uiRevision);
+}
+static int RequestUi(uint32_t kind,uint32_t value)
+{
+  if(AppCapture_Busy() || !AppRange_SettingsReady()) return 0;
+  if(APP_BOARD_ROLE==APP_BOARD_A) {
+    ++uiRevision; if(!uiRevision) ++uiRevision;
+    ApplyUi(kind==0 ? (AppPage)value : uiPage,kind==1 ? (int32_t)value-100 : temperature);
+    uiLastSend=HAL_GetTick()-250U;
+  } else {
+    uiPendingId=++uiRequestId; if(!uiPendingId) uiPendingId=++uiRequestId;
+    uiRequestKind=kind; uiRequestValue=value; uiLastSend=HAL_GetTick()-250U;
+    ClearMeasurements();
+  }
+  return 1;
+}
+int AppRange_RequestPage(AppPage page)
+{
+  if((unsigned)page>(unsigned)APP_PAGE_POSITION) return 0;
+  if(page==uiPage) return 1;
+  return RequestUi(0,(uint32_t)page);
+}
+int AppRange_AdjustTemperature(int32_t stepDeciC)
+{
+  int32_t next=temperature+stepDeciC;
+  if((stepDeciC!=5 && stepDeciC!=-5) || next < -100 || next > 500) return 0;
+  return RequestUi(1,(uint32_t)(next+100));
+}
+int AppRange_SyncElapsed(uint64_t *elapsedUs,uint64_t *localUs)
+{
+  uint64_t master=0;
+  *elapsedUs=0; *localUs=RangeClock_Now()/1000ULL;
+  if(!syncOriginNs || !AppRange_MasterTime(&master) || master<syncOriginNs) return 0;
+  *elapsedUs=(master-syncOriginNs)/1000ULL;
+  return 1;
+}
+static void UiProcess(uint32_t now)
+{
+  if(!appRangeStatus.locked) syncOriginNs=0;
+  if(now-uiLastSend<250U) return;
+  uiLastSend=now;
+  if(APP_BOARD_ROLE==APP_BOARD_A)
+    Send(UI_STATE,uiRevision,0,(uint64_t)(temperature+100),uiPage,syncOriginNs,peerEpoch,uiLastRequest);
+  else if(uiPendingId)
+    Send(UI_REQUEST,uiPendingId,0,uiRequestKind,uiRequestValue,0,0,0);
 }
 
 void AppRange_ResetRound(void)
@@ -187,6 +270,39 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
       G64(bytes+8)!=AppNet_PeerSession() || G64(bytes+16)!=AppNet_LocalSession()) goto reject;
   type=bytes[5]; id=G32(bytes+24); epoch=G32(bytes+28);
   x=G64(bytes+32); y=G64(bytes+40); z=G64(bytes+48);
+  if(APP_BOARD_ROLE==APP_BOARD_A && type==UI_ACK) {
+    if(id==uiRevision && G32(bytes+72)==uiRevision) uiAckRevision=id;
+    return;
+  }
+  if(APP_BOARD_ROLE==APP_BOARD_A && type==UI_REQUEST) {
+    if(!id || x>1 || (x==0 && y>APP_PAGE_POSITION) ||
+       (x==1 && (y>600 || y%5))) goto reject;
+    if(!uiLastRequest || (id!=uiLastRequest && id-uiLastRequest<0x80000000UL)) {
+      /* Request values are absolute, so duplicates cannot double-step temperature. */
+      uiLastRequest=id;
+      if((x==0 && uiPage!=(AppPage)y) || (x==1 && temperature!=(int32_t)y-100)) {
+        ++uiRevision; if(!uiRevision) ++uiRevision;
+        ApplyUi(x==0 ? (AppPage)y : uiPage,x==1 ? (int32_t)y-100 : temperature);
+      }
+    }
+    uiLastSend=now-250U;
+    return;
+  }
+  if(APP_BOARD_ROLE==APP_BOARD_B && type==UI_STATE) {
+    if(!id || id!=G32(bytes+72) || x>600 || x%5 || y>APP_PAGE_POSITION) goto reject;
+    if(uiKnown && id!=uiRevision && id-uiRevision>=0x80000000UL) goto reject;
+    if(!uiKnown || id!=uiRevision) {
+      uiRevision=id; ApplyUi((AppPage)y,(int32_t)x-100); uiKnown=1;
+    }
+    if(uiPendingId && G64(bytes+64)==uiPendingId) uiPendingId=0;
+    if(appRangeStatus.locked && G64(bytes+56)==syncEpoch) syncOriginNs=z;
+    Send(UI_ACK,id,0,0,0,0,0,0);
+    return;
+  }
+  /* Clock traffic is independent of UI configuration. Every measurement packet
+   * carries the setting revision so delayed results cannot cross a page/temp edit. */
+  if(type>=EVENT && type<=PEAK_DIAG &&
+     (!RangingEnabled() || G32(bytes+72)!=uiRevision)) goto reject;
   if (APP_BOARD_ROLE==APP_BOARD_A)
   {
     if (type==SYNC_REQ && rx)
@@ -199,7 +315,9 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
     {
       if (lastStateId && (id-lastStateId==0 || id-lastStateId>=0x80000000UL)) goto reject;
       lastStateId=id;
-      if (epoch!=peerEpoch || !x) ClearMeasurements();
+      if (epoch!=peerEpoch || !x) { ClearMeasurements(); syncOriginNs=0; }
+      if(x && !syncOriginNs)
+        syncOriginNs=(RangeClock_Now()/1000000000ULL+1U)*1000000000ULL;
       peerEpoch=epoch; appRangeStatus.locked=(uint8_t)x;
       appRangeStatus.syncErrorNs=(uint32_t)y; lastStateMs=now;
       return;
@@ -360,6 +478,25 @@ static void DetectionReady(uint64_t stamp, uint32_t quality)
   }
 #endif
   if (!appRangeStatus.locked) { ++appRangeStatus.unlockedEvents; return; }
+#if APP_RANGE_JOINT_PEAKS
+  {
+    unsigned p;
+    memset(&appRangeArrival,0,sizeof(appRangeArrival));
+    for(p=0;detectedPeaks.count && p<3;++p) {
+      int64_t offset=(int64_t)p*RANGE_PULSE_STEP*1000000000LL/APP_AUDIO_SAMPLE_RATE;
+      uint64_t local,master;
+      offset+=detectedPeaks.peak[0].offsetNs[p];
+      local=(uint64_t)((int64_t)stamp+offset);
+      master=APP_BOARD_ROLE==APP_BOARD_B ? RangeSync_Master(&syncModel,local) : local;
+      appRangeArrival.localUs[p]=local/1000ULL;
+      if(syncOriginNs && master>=syncOriginNs) {
+        appRangeArrival.syncUs[p]=(master-syncOriginNs)/1000ULL;
+        appRangeArrival.valid|=(uint8_t)(1U<<p);
+      }
+    }
+    appRangeArrival.eventId=appRangeStatus.events;
+  }
+#endif
   if (APP_BOARD_ROLE==APP_BOARD_A)
   {
     localEvents[localIndex].time=stamp; localEvents[localIndex].id=++sequence;
@@ -476,7 +613,7 @@ static void AudioProcess(void)
 int AppRange_MasterTime(uint64_t *masterNs)
 {
   uint64_t localNs;
-  if (!clockReady || !appNetStatus.online || !appRangeStatus.locked) return 0;
+  if (!clockReady || !appNetStatus.online || !appRangeStatus.locked || AppCapture_Busy()) return 0;
   localNs = RangeClock_Now();
   *masterNs = APP_BOARD_ROLE == APP_BOARD_B ?
               RangeSync_Master(&syncModel, localNs) : localNs;
@@ -487,7 +624,7 @@ int AppRange_DisplayReady(void)
 {
   uint64_t count;
   uint32_t mask;
-  if(!clockReady || !pcb || AppCapture_Busy()) return 1; /* Keep recorder errors visible. */
+  if(!clockReady || !pcb || AppCapture_Busy() || !RangingEnabled()) return 1;
   mask=__get_PRIMASK(); __disable_irq();
   count=audioCount;
   __set_PRIMASK(mask);
@@ -553,7 +690,7 @@ static void PairEvents(void)
 #endif
       appRangeStatus.resultDeltaUs=(int32_t)(delta/1000);
       delta-=APP_RANGE_BIAS_NS;
-      if(!RangeDsp_Distance(delta,APP_TEMPERATURE_DECI_C,&resultMm,&direction))
+      if(!RangeDsp_Distance(delta,temperature,&resultMm,&direction))
       { ++appRangeStatus.rejected; ++appRangeStatus.distanceRejects; continue; }
       /* Include clock uncertainty in the ambiguous-direction band. */
       if (delta <= (int64_t)appRangeStatus.syncErrorNs && delta >= -(int64_t)appRangeStatus.syncErrorNs)
@@ -623,7 +760,12 @@ void AppRange_Process(void)
   }
   {
     uint64_t start=RangeClock_Now(), finish, elapsed;
-    AudioProcess(); /* Full-rate PCM; never run DSP in the DMA ISR. */
+    if(RangingEnabled()) AudioProcess(); /* Never run DSP in the DMA ISR. */
+    else {
+      uint32_t mask=__get_PRIMASK();
+      __disable_irq(); readSample=audioCount; seenEpoch=audioEpoch; __set_PRIMASK(mask);
+      haveWindow=0; lastDetection=0;
+    }
     finish=RangeClock_Now(); elapsed=finish-start; dspBusyNs+=elapsed;
     if(elapsed/1000>appRangeStatus.dspMaxUs) appRangeStatus.dspMaxUs=(uint32_t)(elapsed/1000);
     if(!dspPeriodStart) dspPeriodStart=start;
@@ -642,10 +784,16 @@ void AppRange_Process(void)
     {
       connection=appNetStatus.online?AppNet_PeerSession():0;
       Unlock(); appRangeStatus.resultId=0; lastSyncNs=0; lastStateId=0;
+      uiKnown=0; uiAckRevision=0; uiPendingId=0;
+      if(connection && connection!=uiPeerSession) {
+        uiPeerSession=connection; uiLastRequest=0;
+      }
+      uiLastSend=now-250U;
       lastSyncMs=now-100; lastStateMs=now;
     }
     return;
   }
+  UiProcess(now);
   if(APP_BOARD_ROLE==APP_BOARD_B)
   {
     if(lastSyncNs && RangeClock_Now()-lastSyncNs>1500000000ULL)
@@ -679,7 +827,7 @@ void AppRange_Process(void)
   {
     if(appRangeStatus.locked && now-lastStateMs>1500) Unlock();
 #if APP_RANGE_STATISTICS
-    if(appRangeStatus.locked && batch.stage==1 && now-batch.startMs>=APP_RANGE_BATCH_MS) {
+    if(RangingEnabled() && appRangeStatus.locked && batch.stage==1 && now-batch.startMs>=APP_RANGE_BATCH_MS) {
       RangeBatch_Finish(&batch);
       appRangeStatus.batchStage=batch.stage; appRangeStatus.batchUsed=batch.used;
       appRangeStatus.batchSpanMm=batch.span;
@@ -692,9 +840,9 @@ void AppRange_Process(void)
       } /* On failure retain the last single-shot preview, explicitly labelled. */
     }
 #endif
-    if(appRangeStatus.locked) PairEvents();
+    if(RangingEnabled() && appRangeStatus.locked) PairEvents();
 #if APP_RANGE_JOINT_PEAKS
-    if(appRangeStatus.locked && now-peakStateMs>=500) {
+    if(RangingEnabled() && appRangeStatus.locked && now-peakStateMs>=500) {
       peakStateMs=now;
       Send(PEAK_STATE,++sequence,peerEpoch,appRangeStatus.peakUncertain,
            appRangeStatus.peakAmbiguous,appRangeStatus.peakInconsistent,
@@ -717,7 +865,7 @@ void AppRange_Process(void)
       Send(RESULT,pendingResultId,peerEpoch,txResultMm,txResultSide,txResultQuality,txResultKind,0);
     }
 #if APP_RANGE_STATISTICS
-    if(appRangeStatus.locked && now-batchStateMs>=500) {
+    if(RangingEnabled() && appRangeStatus.locked && now-batchStateMs>=500) {
       batchStateMs=now;
       Send(BATCH_STATE,++sequence,peerEpoch,batch.stage,batch.count,batch.used,batch.span,appRangeStatus.resultId);
     }

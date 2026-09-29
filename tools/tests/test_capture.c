@@ -24,6 +24,7 @@ static uint8_t *peerBlob;
 static uint32_t peerBlobSize;
 uint32_t HAL_GetTick(void) { uint32_t result=tick;tick+=tickAdvance;return result; }
 uint64_t RangeClock_Now(void) { return (uint64_t)tick*1000000ULL; }
+int32_t AppRange_Temperature(void) { return 255; }
 int AppRange_MasterTime(uint64_t *ns) { *ns=RangeClock_Now();return 1; }
 void AppRange_ResetRound(void) { ++resets;memset(&appRangeStatus,0,sizeof(appRangeStatus)); }
 uint64_t AppNet_LocalSession(void) { return 11; }

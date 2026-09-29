@@ -23,4 +23,6 @@ void BSP_LCD_DrawVLine(uint16_t x, uint16_t y, uint16_t height);
 void BSP_LCD_Clear(uint32_t color);
 void BSP_LCD_SetLayerAddress_NoReload(int layer, uint32_t address);
 void BSP_LCD_Reload(int mode);
+void BSP_LCD_FillRect(uint16_t x,uint16_t y,uint16_t w,uint16_t h);
+void BSP_LCD_DrawPixel(uint16_t x,uint16_t y,uint32_t color);
 #endif

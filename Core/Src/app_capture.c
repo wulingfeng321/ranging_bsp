@@ -142,7 +142,7 @@ static void Seal(void)
   sealedPeer=AppNet_PeerSession();
   memset(HEADER,0,HEADER_SIZE);
   (void)snprintf(HEADER,HEADER_SIZE,
-    "{\"format\":\"RNG1\",\"firmware_base\":\"dd73c22+capture4\",\"board\":\"%s\","
+    "{\"format\":\"RNG1\",\"firmware_base\":\"547e914+touch-ui1\",\"board\":\"%s\","
     "\"rate\":%lu,\"channels\":2,\"sample_bytes\":2,\"frames\":%lu,\"header_bytes\":4096,"
     "\"anchor_count\":%lu,\"anchor_bytes\":24,\"log_bytes\":%lu,\"log_overflow\":%lu,"
     "\"triggered\":%lu,\"temperature_deci_c\":%d,\"profile\":%d,\"joint\":%d,"
@@ -150,7 +150,7 @@ static void Seal(void)
     "\"sample_period_ps\":%lu,\"session\":%llu,\"peer_session\":%llu}",
     APP_BOARD_NAME,(unsigned long)APP_AUDIO_SAMPLE_RATE,(unsigned long)(savedBlocks*APP_AUDIO_HALF_FRAMES),
     (unsigned long)savedBlocks,(unsigned long)logBytes,(unsigned long)logOverflow,(unsigned long)triggered,
-    APP_TEMPERATURE_DECI_C,APP_RANGE_AUDIO_PROFILE,APP_RANGE_JOINT_PEAKS,
+    (int)AppRange_Temperature(),APP_RANGE_AUDIO_PROFILE,APP_RANGE_JOINT_PEAKS,
     (unsigned long long)local,(unsigned long long)master,locked,(unsigned long)appRangeStatus.syncErrorNs,
     (unsigned long)appRangeStatus.samplePeriodPs,(unsigned long long)AppNet_LocalSession(),
     (unsigned long long)AppNet_PeerSession());
