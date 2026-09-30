@@ -2,8 +2,9 @@
 #define APP_MIC_SCOPE_H
 #include <stdint.h>
 
-/* Whole frames use a shared master-clock cadence; acquisition runs continuously. */
-#define MIC_SCOPE_REFRESH_MS 200U
+/* STANDARD/DETAILS and POSITION use local 2 Hz; WAVE/CLAP use master time.
+ * Acquisition runs continuously. */
+#define MIC_SCOPE_REFRESH_MS 500U
 #define MIC_SCOPE_WAVE_REFRESH_MS 50U
 #define MIC_SCOPE_POSITION_REFRESH_MS 500U
 #define MIC_SCOPE_CLAP_REFRESH_MS 100U

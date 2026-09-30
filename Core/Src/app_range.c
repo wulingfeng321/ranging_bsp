@@ -45,13 +45,26 @@ static uint64_t batchFirstEventNs, batchLastEventNs;
 #define POSITION_RESULT 17U
 #define CLAP_EVENT 18U
 #define CLAP_RESULT 19U
+#define AUTO_STATUS_REQUEST 20U
+#define AUTO_STATUS_STATE 21U
 #define AUDIO_RING (APP_AUDIO_SAMPLE_RATE == 48000U ? 32768U : 8192U)
-#define RANGE_WIRE_VERSION (APP_AUDIO_SAMPLE_RATE == 48000U ? 11U : 10U)
+#define RANGE_WIRE_VERSION (APP_AUDIO_SAMPLE_RATE == 48000U ? 12U : 11U)
 extern struct netif gnetif;
 AppRangeStatus appRangeStatus;
 AppRangeArrival appRangeArrival;
 static AppPage uiPage = APP_PAGE_STANDARD;
 static int32_t temperature = APP_TEMPERATURE_DECI_C;
+static AppRangeTemperatureReader temperatureReader;
+static uint32_t autoStatus,autoSerial=1,autoRequestCounter,autoPendingId,autoPendingStatus;
+static uint32_t autoSeenRequest,autoSeenState;
+static void AutoFeedback(uint32_t status)
+{
+  autoStatus=status;
+  if(APP_BOARD_ROLE==APP_BOARD_A) { if(!++autoSerial) ++autoSerial; }
+  else { autoPendingStatus=status;autoPendingId=++autoRequestCounter;
+    if(!autoPendingId) autoPendingId=++autoRequestCounter; }
+}
+unsigned AppRange_AutoTemperatureStatus(void) { return autoStatus; }
 static uint32_t uiRevision=1, uiAckRevision, uiLastSend;
 static uint32_t uiRequestId, uiPendingId, uiRequestKind, uiRequestValue, uiLastRequest;
 static uint8_t uiKnown;
@@ -305,7 +318,21 @@ int AppRange_AdjustTemperature(int32_t stepDeciC)
 {
   int32_t next=temperature+stepDeciC;
   if((stepDeciC!=5 && stepDeciC!=-5) || next < -100 || next > 500) return 0;
+  AutoFeedback(0);
   return RequestUi(1,(uint32_t)(next+100));
+}
+void AppRange_SetTemperatureReader(AppRangeTemperatureReader reader)
+{ temperatureReader=reader; }
+int AppRange_AutoTemperature(void)
+{
+  int32_t value,rounded;
+  if(AppCapture_Busy() || !AppRange_SettingsReady()) { AutoFeedback(3);return -1; }
+  if(!temperatureReader || !temperatureReader(&value)) { AutoFeedback(2);return 0; }
+  if(value< -100 || value>500) { AutoFeedback(4);return -2; }
+  /* Preserve the existing 0.5 C wire/UI grid, symmetric at negative values. */
+  rounded=value>=0 ? ((value+2)/5)*5 : -(((-value+2)/5)*5);
+  if(RequestUi(1,(uint32_t)(rounded+100))) { AutoFeedback(1);return 1; }
+  AutoFeedback(3);return -1;
 }
 int AppRange_SyncElapsed(uint64_t *elapsedUs,uint64_t *localUs)
 {
@@ -320,6 +347,10 @@ static void UiProcess(uint32_t now)
   if(!appRangeStatus.locked) syncOriginNs=0;
   if(now-uiLastSend<250U) return;
   uiLastSend=now;
+  if(APP_BOARD_ROLE==APP_BOARD_A)
+    Send(AUTO_STATUS_STATE,autoSerial,0,autoStatus,autoSeenRequest,0,0,0);
+  else if(autoPendingId)
+    Send(AUTO_STATUS_REQUEST,autoPendingId,0,autoPendingStatus,0,0,0,0);
   if(APP_BOARD_ROLE==APP_BOARD_A)
     Send(UI_STATE,uiRevision,0,(uint64_t)(temperature+100),uiPage,syncOriginNs,peerEpoch,uiLastRequest);
   else if(uiPendingId)
@@ -371,6 +402,23 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
       G64(bytes+8)!=AppNet_PeerSession() || G64(bytes+16)!=AppNet_LocalSession()) goto reject;
   type=bytes[5]; id=G32(bytes+24); epoch=G32(bytes+28);
   x=G64(bytes+32); y=G64(bytes+40); z=G64(bytes+48);
+  /* Feedback is independent from measurement revision: N/A must not reset
+   * a running measurement. Periodic snapshots/retries survive packet loss. */
+  if(type==AUTO_STATUS_REQUEST && APP_BOARD_ROLE==APP_BOARD_A) {
+    if(!id || x>4) goto reject;
+    if(!autoSeenRequest || (id!=autoSeenRequest && id-autoSeenRequest<0x80000000UL)) {
+      autoSeenRequest=id;AutoFeedback((uint32_t)x);
+    }
+    uiLastSend=now-250U;return;
+  }
+  if(type==AUTO_STATUS_STATE && APP_BOARD_ROLE==APP_BOARD_B) {
+    if(!id || x>4 || y>UINT32_MAX) goto reject;
+    if(autoSeenState && id!=autoSeenState && id-autoSeenState>=0x80000000UL) return;
+    if(autoPendingId && y!=autoPendingId) return;
+    autoSeenState=id;autoStatus=(uint32_t)x;
+    if(autoPendingId && y==autoPendingId) autoPendingId=0;
+    return;
+  }
   if(APP_BOARD_ROLE==APP_BOARD_A && type==UI_ACK) {
     if(id==uiRevision && G32(bytes+72)==uiRevision) uiAckRevision=id;
     return;
@@ -1278,6 +1326,8 @@ void AppRange_Process(void)
       uiKnown=0; uiAckRevision=0; uiPendingId=0;
       if(connection && connection!=uiPeerSession) {
         uiPeerSession=connection; uiLastRequest=0;
+        autoSeenRequest=autoSeenState=autoPendingId=autoStatus=0;
+        if(!++autoSerial) ++autoSerial;
       }
       uiLastSend=now-250U;
       lastSyncMs=now-100; lastStateMs=now;

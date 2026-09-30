@@ -34,6 +34,7 @@ static int32_t drawnTemperature=APP_TEMPERATURE_DECI_C;
 static uint64_t presentAt;
 static uint8_t framePending, started, touchReady, touchHeld, dirty=1, diagnostics;
 static int touchCandidate;
+
 static AppPage drawnPage=APP_PAGE_POSITION;
 static MicScope_RangeState rangeState=MIC_SCOPE_RANGE_WAITING;
 static const char *audioStatus="MIC STARTING";
@@ -151,6 +152,14 @@ static void Standard(uint32_t now)
         (unsigned long)(appRangeArrival.syncUs[p]%1000000ULL),
         (unsigned long long)appRangeArrival.localUs[p]);
     else (void)snprintf(line,sizeof(line),"P%u  SYNC --.------ s  LOCAL -- us",p+1);
+    if(p) {
+      size_t used=strlen(line);
+      if(appRangeStatus.locked && (appRangeArrival.valid&(3U<<(p-1)))==(3U<<(p-1))) {
+        uint64_t current=appRangeArrival.localUs[p],previous=appRangeArrival.localUs[p-1];
+        (void)snprintf(line+used,sizeof(line)-used," %c%lluus",current>=previous ? '+':'-',
+          (unsigned long long)(current>=previous ? current-previous : previous-current));
+      } else (void)snprintf(line+used,sizeof(line)-used," +--us");
+    }
     Text(12,(uint16_t)(145+p*14),line,ACCENT);
   }
   Font(&Font16);
@@ -158,6 +167,10 @@ static void Standard(uint32_t now)
   Text(12,197,line,LCD_COLOR_WHITE); Font(&Font12);
   (void)snprintf(line,sizeof(line),"SOUND %ld.%03ld m/s  UNCAL",(long)(speed/1000),(long)(speed%1000));
   Text(12,218,line,MUTED);
+  { unsigned status=AppRange_AutoTemperatureStatus();
+    if(status) Text(174,197,status==1 ? "OK" : (status==2 ? "N/A" : (status==3 ? "WAIT":"ERR")),WARN);
+  }
+  Button(222,191,74,36,"AUTO",AppRange_SettingsReady() && !AppCapture_Busy());
   Button(306,191,76,36,"-0.5 C",AppRange_SettingsReady() && !AppCapture_Busy() && temp>-100);
   Button(392,191,76,36,"+0.5 C",AppRange_SettingsReady() && !AppCapture_Busy() && temp<500);
   Footer();
@@ -327,30 +340,33 @@ static void PositionPage(uint32_t now)
     Text(219,145,"L",MUTED); Text(219,180,"R",MUTED);
     Text(447,145,"L",MUTED); Text(447,180,"R",MUTED);
   } else {
-    Text(12,76,"SOURCE DIRECTION / 0 DEG = TOP",ACCENT);
-    Outline(107,146,166,36,PANEL);
-    Box(106,146,8,8,0xFFFF4444U); Box(106,174,8,8,0xFFFF4444U);
-    Box(266,146,8,8,0xFFFF4444U); Box(266,174,8,8,0xFFFF4444U);
-    Text(88,189,"A",MUTED); Text(277,189,"B",MUTED);
-    Text(168,208,"13 cm",MUTED); Text(282,157,"2 cm",MUTED);
-    Text(169,94,"FRONT",MUTED);
+    /* 480/9.5 and 272/5.5 px per cm: +0.5cm right, -0.5cm up.
+     * Visual origin only; physical microphone coordinates remain unchanged. */
+    const int ox=25,oy=-25;
+    Text(12,76,"DIRECTION / 0 = TOP",ACCENT);
+    Outline(107+ox,146+oy,166,36,PANEL);
+    Box(106+ox,146+oy,8,8,0xFFFF4444U); Box(106+ox,174+oy,8,8,0xFFFF4444U);
+    Box(266+ox,146+oy,8,8,0xFFFF4444U); Box(266+ox,174+oy,8,8,0xFFFF4444U);
+    Text(88+ox,189+oy,"A",MUTED); Text(277+ox,189+oy,"B",MUTED);
+    Text(168+ox,208+oy,"13 cm",MUTED); Text(282+ox,157+oy,"2 cm",MUTED);
+    Text(169+ox,94+oy,"FRONT",MUTED);
     if(valid) {
       float rad=appPositionStatus.angleDeg*0.01745329252f;
       float dx=sinf(rad),dy=-cosf(rad);
-      int x=190+(int)(dx*54),y=164+(int)(dy*54);
-      PositionLine(190,164,x,y,GOOD);
+      int x=190+ox+(int)(dx*54),y=164+oy+(int)(dy*54);
+      PositionLine(190+ox,164+oy,x,y,GOOD);
       PositionLine(x,y,x-(int)(dx*12+dy*7),y-(int)(dy*12-dx*7),GOOD);
       PositionLine(x,y,x-(int)(dx*12-dy*7),y-(int)(dy*12+dx*7),GOOD);
       Font(&Font24); (void)snprintf(line,sizeof(line),"%ld deg",(long)appPositionStatus.angleDeg);
-      Text(333,117,line,GOOD); Font(&Font12);
-      (void)snprintf(line,sizeof(line),"Q:%lu",(unsigned long)appPositionStatus.quality); Text(333,151,line,MUTED);
-      (void)snprintf(line,sizeof(line),"FIT:%lu us",(unsigned long)(appPositionStatus.residualNs/1000)); Text(333,169,line,MUTED);
-    } else Text(327,128,"NO DIRECTION",WARN);
-    Text(327,193,appPositionStatus.calibration==2 ? "CAL OK" :
+      Text(345,117,line,GOOD); Font(&Font12);
+      (void)snprintf(line,sizeof(line),"Q:%lu",(unsigned long)appPositionStatus.quality); Text(345,151,line,MUTED);
+      (void)snprintf(line,sizeof(line),"FIT:%lu us",(unsigned long)(appPositionStatus.residualNs/1000)); Text(345,169,line,MUTED);
+    } else Text(345,128,"NO DIRECTION",WARN);
+    Text(345,193,appPositionStatus.calibration==2 ? "CAL OK" :
       (appPositionStatus.calibration==1 ? "CALIBRATING" : (appPositionStatus.calibration==3 ? "CAL FAILED":"UNCAL")),WARN);
     if(valid) {
       static const char *names[]={"FRONT","FRONT-RIGHT","RIGHT","BACK-RIGHT","BACK","BACK-LEFT","LEFT","FRONT-LEFT"};
-      Text(327,211,names[((appPositionStatus.angleDeg+22)/45)%8],GOOD);
+      Text(345,211,names[((appPositionStatus.angleDeg+22)/45)%8],GOOD);
     }
   }
   (void)snprintf(line,sizeof(line),"E:%lu RX:%lu LV:%lu Q:%lu/%lu G:%lu B:%lu AT:%s",
@@ -399,6 +415,7 @@ static int Hit(uint16_t x,uint16_t y)
   if(diagnostics) return x>=356 && y>=241 ? 8 : 0;
   if(x>=382 && y>=122 && y<144) return 7;
   if(y>=191 && y<227) {
+    if(x>=222 && x<296) return 12;
     if(x>=306 && x<382) return 5;
     if(x>=392 && x<468) return 6;
   }
@@ -426,7 +443,10 @@ static void Touch(uint32_t now)
   if(!hit || touchHeld || now-touchSince<40U) return;
   touchHeld=1;
   if(hit<=4) (void)AppRange_RequestPage((AppPage)(hit-1));
-  else if(hit==5 || hit==6) (void)AppRange_AdjustTemperature(hit==5 ? -5 : 5);
+  else if(hit==5 || hit==6) { (void)AppRange_AdjustTemperature(hit==5 ? -5 : 5); }
+  else if(hit==12) {
+    (void)AppRange_AutoTemperature();dirty=1;
+  }
   else if(hit==11) { (void)AppRange_ClearClapStats(); dirty=1; }
   else if(hit==10) { (void)AppRange_PositionCalibrate(); dirty=1; }
   else if(hit==9) { (void)AppRange_WaveRelock(); dirty=1; }
@@ -468,7 +488,9 @@ void MicScope_Process(void)
     (page==APP_PAGE_POSITION ? MIC_SCOPE_POSITION_REFRESH_MS :
     (page==APP_PAGE_CLAP ? MIC_SCOPE_CLAP_REFRESH_MS : MIC_SCOPE_REFRESH_MS));
   period=(uint64_t)refresh*1000000ULL;
-  synced=AppRange_MasterTime(&master);
+  /* Standard/DETAILS and POSITION use each board's local 2 Hz cadence.
+   * WAVE and CLAP retain common presentation times. */
+  synced=(page==APP_PAGE_WAVE || page==APP_PAGE_CLAP) && AppRange_MasterTime(&master);
   if(dirty) { framePending=0; presentAt=0; lastDraw=now-refresh; dirty=0; }
   if(!synced) {
     if(presentAt) lastDraw=now-refresh;
@@ -491,7 +513,13 @@ void MicScope_Process(void)
   hLtdcHandler.LayerCfg[0].FBStartAdress=backBuffer;
   {
     uint64_t drawStart=RangeClock_Now();
-    Draw(now,page); lastDraw=now; __DSB();
+    Draw(now,page);
+    if(page==APP_PAGE_STANDARD || page==APP_PAGE_POSITION) {
+      /* Retain the local 500 ms grid; skip missed slots instead of queuing
+       * old frames or shifting every deadline after a slow DSP iteration. */
+      lastDraw+=((now-lastDraw)/refresh)*refresh;
+    } else lastDraw=now;
+    __DSB();
     if(page==APP_PAGE_POSITION) {
       uint32_t us=(uint32_t)((RangeClock_Now()-drawStart)/1000U);
       if(us>appPositionStatus.lcdMaxUs) appPositionStatus.lcdMaxUs=us;

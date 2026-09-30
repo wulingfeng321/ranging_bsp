@@ -2,6 +2,8 @@
 #define main original_test_main
 #include "test_app_range.c"
 #undef main
+static int32_t sensorValue;
+static int SensorRead(int32_t *out) { *out=sensorValue;return 1; }
 int main(void)
 {
   uint64_t elapsed,local,origin; uint32_t rev,id,events;
@@ -24,6 +26,17 @@ int main(void)
   assert(appRangeArrival.valid==7 && appRangeArrival.localUs[0]==10000999);
   assert(appRangeArrival.localUs[1]==10041002 && appRangeArrival.localUs[2]==10081003);
   assert(appRangeArrival.syncUs[0]==(APP_BOARD_ROLE==APP_BOARD_B ? 999 : 1000999));
+  assert(AppRange_AutoTemperature()==0);
+  AppRange_SetTemperatureReader(SensorRead);sensorValue=501;
+  assert(AppRange_AutoTemperature()==-2);
+  sensorValue=253;assert(AppRange_AutoTemperature()==1);
+  if(APP_BOARD_ROLE==APP_BOARD_A) {
+    assert(temperature==255);Inject(UI_ACK,uiRevision,0,0,0,0);
+  } else {
+    assert(uiPendingId && uiRequestKind==1 && uiRequestValue==355);
+    uiPendingId=0;
+  }
+  AppRange_SetTemperatureReader(NULL);temperature=250;
   origin=syncOriginNs;
   assert(AppRange_RequestPage(APP_PAGE_WAVE));
   assert(!AppRange_SettingsReady());
@@ -92,6 +105,24 @@ int main(void)
   Unlock(); assert(!syncOriginNs && !appRangeArrival.valid);
   assert(!AppRange_SyncElapsed(&elapsed,&local) && !elapsed);
   appNetStatus.online=0; assert(!AppRange_RequestPage(APP_PAGE_CLAP));
+  appNetStatus.online=1;uiKnown=1;uiAckRevision=uiRevision;uiPendingId=0;
+  autoPendingId=autoSeenState=autoSeenRequest=0;
+  rev=uiRevision;events=appRangeStatus.events;
+  if(APP_BOARD_ROLE==APP_BOARD_A) {
+    AutoFeedback(2);assert(AppRange_AutoTemperatureStatus()==2);
+    Inject(AUTO_STATUS_REQUEST,100,0,3,0,0);assert(autoStatus==3);
+    id=autoSerial;Inject(AUTO_STATUS_REQUEST,100,0,3,0,0);assert(autoSerial==id);
+    AutoFeedback(4);Inject(AUTO_STATUS_REQUEST,99,0,2,0,0);assert(autoStatus==4);
+    Inject(AUTO_STATUS_REQUEST,101,0,0,0,0);assert(!autoStatus);
+  } else {
+    AutoFeedback(2);id=autoPendingId;
+    Inject(AUTO_STATUS_STATE,100,0,1,0,0);assert(autoStatus==2 && autoPendingId==id);
+    Inject(AUTO_STATUS_STATE,101,0,2,id,0);assert(autoStatus==2 && !autoPendingId);
+    Inject(AUTO_STATUS_STATE,102,0,3,id,0);assert(autoStatus==3);
+    Inject(AUTO_STATUS_STATE,101,0,2,id,0);assert(autoStatus==3);
+    Inject(AUTO_STATUS_STATE,103,0,0,id,0);assert(!autoStatus);
+  }
+  assert(uiRevision==rev && appRangeStatus.events==events);
   puts("PASS: linked UI, retransmission, stale revisions, temperature bounds, paused DSP, pulse clocks, unlock reset");
   return 0;
 }

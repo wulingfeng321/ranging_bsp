@@ -44,6 +44,17 @@ int32_t AppRange_Temperature(void);
 int AppRange_SettingsReady(void);
 int AppRange_RequestPage(AppPage page);
 int AppRange_AdjustTemperature(int32_t stepDeciC);
+/* Optional sensor adapter, main-loop only. Return 1 with a fresh valid cached
+ * reading in 0.1 C, or 0 if unavailable/stale/faulty. Must not block for conversion.
+ * Register on the board with the sensor; the existing A-authoritative UI protocol
+ * distributes accepted readings from either board to both boards. */
+typedef int (*AppRangeTemperatureReader)(int32_t *temperatureDeciC);
+void AppRange_SetTemperatureReader(AppRangeTemperatureReader reader);
+/* 1=request accepted, 0=no sensor/data, -1=busy/offline, -2=invalid reading.
+ * One AUTO press reads once; no continuous acquisition or ADC/I2C driver here. */
+int AppRange_AutoTemperature(void);
+/* Shared AUTO feedback: 0 clear, 1 OK, 2 N/A, 3 WAIT, 4 ERR. */
+unsigned AppRange_AutoTemperatureStatus(void);
 /* Common counter starts at an A-clock second boundary after lock; zero while
  * unlocked or awaiting the common origin. Local clock never resets. */
 int AppRange_SyncElapsed(uint64_t *elapsedUs, uint64_t *localUs);

@@ -4,6 +4,8 @@
 #include <math.h>
 #include "../../Core/Src/app_mic_scope.c"
 static int busy;
+int AppRange_AutoTemperature(void) { return 0; }
+unsigned AppRange_AutoTemperatureStatus(void) { return 0; }
 static unsigned clapClears;
 int AppRange_ClearClapStats(void) { if(busy || !AppRange_SettingsReady()) return 0; ++clapClears;memset(&appClapStatus,0,sizeof(appClapStatus));return 1; }
 int AppCapture_Busy(void) { return busy; }
@@ -113,22 +115,20 @@ int main(int argc,char **argv)
   Step(500); assert(flips==1 && !points); /* Standard page has no waveform. */
   testLtdc.SRCR=0; appRangeStatus.locked=1;
   before=clears; Step(569); assert(clears==before);
-  Step(570); assert(clears==before+1 && framePending && flips==1);
-  Step(599); assert(flips==1);
-  ready=0; Step(600); assert(flips==2 && !framePending);
-  Step(770); assert(clears==before+1); /* Pending VBlank protects front buffer. */
-  testLtdc.SRCR=0; Step(771); assert(clears==before+1); /* Busy DSP skips preparation. */
-  ready=1; Step(970); assert(framePending);
-  Step(1300); assert(!framePending && flips==2); /* Stale frame is dropped. */
-  Step(1370); assert(framePending);
-  appRangeStatus.locked=0; Step(1380); assert(!framePending && !presentAt && flips==3);
-  assert(strstr(screenText,"SYNC 0.000000 s"));
-  testLtdc.SRCR=0; appRangeStatus.locked=1; page=APP_PAGE_WAVE;
-  Step(1420); target=presentAt; assert(framePending && target==1450000000ULL);
-  Step(1450); assert(flips==4);
-  /* Page switch cancels the old frame, then uses the new cadence. */
-  testLtdc.SRCR=0; Step(1470); assert(framePending);
-  page=APP_PAGE_STANDARD; Step(1480); assert(!framePending && presentAt==1600000000ULL);
+  Step(999);assert(clears==before && !framePending && !presentAt);
+  ready=0;Step(1000);assert(clears==before && flips==1); /* Detection takes priority. */
+  ready=1;Step(1001);assert(flips==2 && lastDraw==1000);
+  Step(1500);assert(flips==2); /* Protect the pending VBlank. */
+  testLtdc.SRCR=0;Step(1501);assert(flips==3 && lastDraw==1500);
+  testLtdc.SRCR=0;Step(1999);assert(flips==3);
+  Step(2000);assert(flips==4 && !framePending && !presentAt);
+  testLtdc.SRCR=0;Step(3250);assert(flips==5 && lastDraw==3000);
+  appRangeStatus.locked=0;Step(3280);assert(flips==5); /* Lock does not change local cadence. */
+  ready=1;testLtdc.SRCR=0;appRangeStatus.locked=1;page=APP_PAGE_WAVE;
+  Step(3420);target=presentAt;assert(framePending && target==3450000000ULL);
+  Step(3450);assert(flips==6);
+  testLtdc.SRCR=0;Step(3470);assert(framePending);
+  page=APP_PAGE_STANDARD;Step(3480);assert(!framePending && !presentAt && flips==7);
   /* One press = one edit. No repeat while held or dragged to a second button. */
   Press(2000,420,208); assert(tempEdits==1 && temp==255);
   Touch(2100); Touch(2300); assert(tempEdits==1);
@@ -189,13 +189,12 @@ int main(int argc,char **argv)
   Draw(HAL_GetTick(),page);
   assert(strstr(screenText,"13") && !strstr(screenText,"SAVE:"));
   if(argc>1) Save(argv[1],"position");
-  /* POSITION is capped at 2Hz independently from WAVE's 20Hz. */
+  /* POSITION presents immediately, then on its own 500 ms grid. */
   testLtdc.SRCR=0;page=APP_PAGE_POSITION;drawnPage=page;dirty=1;
-  Step(10020);assert(!framePending && presentAt==10500000000ULL);
-  Step(10470);assert(framePending);before=flips;
-  Step(10500);assert(flips==before+1);
-  testLtdc.SRCR=0;Step(10969);assert(!framePending);
-  Step(10970);assert(framePending);
+  before=flips;Step(10020);assert(flips==before+1 && !framePending && !presentAt);
+  testLtdc.SRCR=0;Step(10519);assert(flips==before+1);
+  appRangeStatus.locked=0;Step(10520);assert(flips==before+2 && lastDraw==10520);
+  testLtdc.SRCR=0;appRangeStatus.locked=1;Step(10570);assert(flips==before+2);
   testLtdc.SRCR=0;page=APP_PAGE_CLAP;drawnPage=page;dirty=1;
   Step(11020);assert(!framePending && presentAt==11100000000ULL);
   Step(11070);assert(framePending);before=flips;
