@@ -26,3 +26,4 @@
 # Python host-test cache
 __pycache__/
 *.pyc
+EWARM/settings/Project.wsdt
