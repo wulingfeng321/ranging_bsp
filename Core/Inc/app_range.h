@@ -63,6 +63,16 @@ typedef struct {
 } AppPositionStatus;
 extern AppPositionStatus appPositionStatus;
 int AppRange_PositionCalibrate(void);
+typedef struct {
+  uint32_t events, received, rejected, drops, noise, quality, distanceCm, updatedMs;
+  uint64_t arrivalUs; /* Latest local detection expressed in master clock us. */
+  int32_t direction; /* +1 source on A side; -1 on B side; 0 ambiguous. */
+  uint16_t recentCm[6]; /* Newest first; A-authoritative rolling window. */
+  uint8_t recentCount;
+  uint8_t ready, valid;
+} AppClapStatus;
+extern AppClapStatus appClapStatus;
+int AppRange_ClearClapStats(void);
 void AppRange_Init(void);
 void AppRange_Process(void);
 /* Recorder transaction only: clears round counters and restarts synchronization. */

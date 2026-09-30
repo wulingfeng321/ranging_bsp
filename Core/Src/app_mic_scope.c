@@ -204,16 +204,47 @@ static void Diagnostics(void)
     (unsigned long)appRangeStatus.dspLoadPermille); Text(12,222,line,MUTED);
   Button(356,241,112,28,"BACK",1); Text(12,249,"Counters wrap; logs retain full values",MUTED);
 }
-static void ClapDemo(void)
+static void ClapPage(uint32_t now)
 {
-  Common(); Font(&Font16); Text(12,80,"CLAP / DEMO ONLY",WARN);
-  Font(&Font24); Text(12,111,"0.500 m",MUTED);
-  Font(&Font12); Text(250,117,"SAMPLE SOURCE: A",MUTED);
-  Text(12,153,"SAMPLE Q:920  N:10/10  SPAN:2mm",MUTED);
-  Text(12,174,"SAMPLE ARRIVAL: 12.345678 s",MUTED);
-  Text(12,205,"Fixed illustration. Clap detector is not implemented.",WARN);
-  Text(12,223,"Ranging paused; clock sync and audio recording remain.",MUTED);
-  Footer();
+  char line[80];
+  int valid=appClapStatus.valid && appRangeStatus.locked && AppRange_SettingsReady() &&
+            now-appClapStatus.updatedMs<=10000U;
+  Common();Font(&Font16);Text(12,78,"CLAP / SINGLE SHOT",ACCENT);
+  Font(&Font24);
+  if(valid) {
+    (void)snprintf(line,sizeof(line),"%lu cm",(unsigned long)appClapStatus.distanceCm);
+    Text(12,106,line,GOOD);
+  } else Text(12,106,"-- cm",MUTED);
+  Font(&Font12);
+  Text(254,113,valid ? (appClapStatus.direction>0 ? "SOURCE: A SIDE" :
+    (appClapStatus.direction<0 ? "SOURCE: B SIDE":"SOURCE: UNCERTAIN")) : "SOURCE: --",valid ? GOOD:MUTED);
+  if(!appRangeStatus.locked) Text(12,145,"WAIT FOR CLOCK SYNC",WARN);
+  else if(!AppRange_SettingsReady()) Text(12,145,"WAIT FOR SETTINGS ACK",WARN);
+  else Text(12,145,appClapStatus.ready ? "READY / CLAP EVERY 1s":"LEARNING / KEEP QUIET",ACCENT);
+  (void)snprintf(line,sizeof(line),"TEMP:%s%ld.%ld C",AppRange_Temperature()<0 ? "-":"",
+    (long)abs(AppRange_Temperature()/10),(long)abs(AppRange_Temperature()%10));
+  Text(326,145,line,MUTED);
+  (void)snprintf(line,sizeof(line),"E:%lu RX:%lu REJ:%lu DROP:%lu NOISE:%lu Q:%lu",
+    (unsigned long)appClapStatus.events,(unsigned long)appClapStatus.received,
+    (unsigned long)appClapStatus.rejected,(unsigned long)appClapStatus.drops,
+    (unsigned long)appClapStatus.noise,(unsigned long)appClapStatus.quality);
+  Text(12,165,line,MUTED);
+  Text(12,184,"RECENT (cm) / NEWEST FIRST",ACCENT);
+  {
+    unsigned i,n=appClapStatus.recentCount;uint32_t sum=0;
+    Font(&Font16);
+    for(i=0;i<6;++i) {
+      if(i<n) { sum+=appClapStatus.recentCm[i];
+        (void)snprintf(line,sizeof(line),"%u: %u",i+1,appClapStatus.recentCm[i]); }
+      else (void)snprintf(line,sizeof(line),"%u: --",i+1);
+      Text((uint16_t)(12+(i%3)*154),(uint16_t)(200+(i/3)*19),line,MUTED);
+    }
+    if(n) { uint32_t mean=(sum*10+n/2)/n;
+      (void)snprintf(line,sizeof(line),"AVG(%u): %lu.%lu cm",n,(unsigned long)(mean/10),(unsigned long)(mean%10)); }
+    else (void)snprintf(line,sizeof(line),"AVG: -- cm");
+    Text(12,247,line,GOOD);
+  }
+  Button(340,241,128,28,"CLEAR STATS",AppRange_SettingsReady() && !AppCapture_Busy());
 }
 static void WaveLive(void)
 {
@@ -351,7 +382,7 @@ static void Draw(uint32_t now,AppPage page)
   textBackground=BG; BSP_LCD_Clear(BG); Tabs(page);
   switch(page) {
     case APP_PAGE_STANDARD: if(diagnostics) Diagnostics(); else Standard(now); break;
-    case APP_PAGE_CLAP: ClapDemo(); break;
+    case APP_PAGE_CLAP: ClapPage(now); break;
     case APP_PAGE_WAVE: WaveLive(); break;
     case APP_PAGE_POSITION: PositionPage(now); break;
     default: break;
@@ -363,6 +394,7 @@ static int Hit(uint16_t x,uint16_t y)
   if(y<32) return 1+x/120;
   if(AppRange_Page()==APP_PAGE_POSITION) return APP_BOARD_ROLE==APP_BOARD_A && x>=340 && y>=74 && y<100 ? 10 : 0;
   if(AppRange_Page()==APP_PAGE_WAVE) return x>=338 && y>=211 && y<237 ? 9 : 0;
+  if(AppRange_Page()==APP_PAGE_CLAP) return x>=340 && x<468 && y>=241 && y<269 ? 11 : 0;
   if(AppRange_Page()!=APP_PAGE_STANDARD) return 0;
   if(diagnostics) return x>=356 && y>=241 ? 8 : 0;
   if(x>=382 && y>=122 && y<144) return 7;
@@ -395,6 +427,7 @@ static void Touch(uint32_t now)
   touchHeld=1;
   if(hit<=4) (void)AppRange_RequestPage((AppPage)(hit-1));
   else if(hit==5 || hit==6) (void)AppRange_AdjustTemperature(hit==5 ? -5 : 5);
+  else if(hit==11) { (void)AppRange_ClearClapStats(); dirty=1; }
   else if(hit==10) { (void)AppRange_PositionCalibrate(); dirty=1; }
   else if(hit==9) { (void)AppRange_WaveRelock(); dirty=1; }
   else { diagnostics=(uint8_t)(hit==7); dirty=1; }
@@ -432,7 +465,8 @@ void MicScope_Process(void)
   }
   if(page!=drawnPage) { diagnostics=0; drawnPage=page; dirty=1; }
   refresh=page==APP_PAGE_WAVE ? MIC_SCOPE_WAVE_REFRESH_MS :
-    (page==APP_PAGE_POSITION ? MIC_SCOPE_POSITION_REFRESH_MS : MIC_SCOPE_REFRESH_MS);
+    (page==APP_PAGE_POSITION ? MIC_SCOPE_POSITION_REFRESH_MS :
+    (page==APP_PAGE_CLAP ? MIC_SCOPE_CLAP_REFRESH_MS : MIC_SCOPE_REFRESH_MS));
   period=(uint64_t)refresh*1000000ULL;
   synced=AppRange_MasterTime(&master);
   if(dirty) { framePending=0; presentAt=0; lastDraw=now-refresh; dirty=0; }

@@ -9,6 +9,7 @@
 #include "range_audio_time.h"
 #include "range_wave.h"
 #include "position_dsp.h"
+#include "clap_dsp.h"
 #if APP_RANGE_JOINT_PEAKS
 #include "range_peak_pair.h"
 #endif
@@ -42,8 +43,10 @@ static uint64_t batchFirstEventNs, batchLastEventNs;
 #define WAVE_CLOCK 15U
 #define POSITION_EVENT 16U
 #define POSITION_RESULT 17U
+#define CLAP_EVENT 18U
+#define CLAP_RESULT 19U
 #define AUDIO_RING (APP_AUDIO_SAMPLE_RATE == 48000U ? 32768U : 8192U)
-#define RANGE_WIRE_VERSION (APP_AUDIO_SAMPLE_RATE == 48000U ? 9U : 8U)
+#define RANGE_WIRE_VERSION (APP_AUDIO_SAMPLE_RATE == 48000U ? 11U : 10U)
 extern struct netif gnetif;
 AppRangeStatus appRangeStatus;
 AppRangeArrival appRangeArrival;
@@ -112,9 +115,48 @@ static void PositionRestartAudio(unsigned gap)
 }
 static void PositionProcess(void);
 static void PositionNetwork(uint32_t now);
+AppClapStatus appClapStatus;
+static ClapDetector clapDetector;
+static uint64_t clapCursor,clapLocal,clapRemote;
+static uint32_t clapEpoch,clapLocalQ,clapRemoteQ,clapEventId,clapRemoteId;
+static uint32_t clapResultId,clapReceivedId,clapEventMs,clapRemoteMs,clapSendMs,clapResultMs;
+static uint8_t clapHaveLocal,clapHaveRemote;
+static void ClapReset(void)
+{
+  uint32_t mask=__get_PRIMASK();
+  __disable_irq();clapCursor=audioCount;clapEpoch=audioEpoch;__set_PRIMASK(mask);
+  Clap_Reset(&clapDetector);memset(&appClapStatus,0,sizeof(appClapStatus));
+  clapHaveLocal=clapHaveRemote=0;clapEventId=clapRemoteId=clapResultId=clapReceivedId=0;
+}
+static void ClapRecord(uint32_t cm)
+{
+  unsigned i;
+  for(i=5;i>0;--i) appClapStatus.recentCm[i]=appClapStatus.recentCm[i-1];
+  appClapStatus.recentCm[0]=(uint16_t)cm;
+  if(appClapStatus.recentCount<6) ++appClapStatus.recentCount;
+}
+static uint64_t ClapHistoryPack(void)
+{
+  unsigned i;uint64_t bits=(uint64_t)appClapStatus.recentCount<<54;
+  for(i=0;i<appClapStatus.recentCount;++i) bits|=(uint64_t)appClapStatus.recentCm[i]<<(i*9);
+  return bits;
+}
+/* Snapshot, not incremental replication: a lost result cannot desync history. */
+static int ClapHistoryValid(uint64_t bits,uint32_t latest)
+{
+  unsigned i,n=(unsigned)(bits>>54);
+  if(!n || n>6 || (bits&511U)!=latest) return 0;
+  for(i=0;i<6;++i) {
+    unsigned cm=(unsigned)((bits>>(i*9))&511U);
+    if((i<n && cm>300) || (i>=n && cm)) return 0;
+  }
+  return 1;
+}
+static void ClapProcess(void);
+static void ClapNetwork(uint32_t now);
 static void WaveReset(void)
 {
-  PositionReset();
+  PositionReset();ClapReset();
   RangeWave_Reset(&waveTone); wavePeriodPs=waveOriginNs=0; waveCalMs=0;
   waveClockId=0; waveSendMs=HAL_GetTick()-250U;
 }
@@ -251,6 +293,8 @@ int AppRange_RequestPage(AppPage page)
   if(page==uiPage) return 1;
   return RequestUi(0,(uint32_t)page);
 }
+int AppRange_ClearClapStats(void)
+{ return uiPage==APP_PAGE_CLAP ? RequestUi(4,0) : 0; }
 int AppRange_PositionCalibrate(void)
 { return uiPage==APP_PAGE_POSITION ? RequestUi(3,0) : 0; }
 int AppRange_WaveRelock(void)
@@ -332,7 +376,7 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
     return;
   }
   if(APP_BOARD_ROLE==APP_BOARD_A && type==UI_REQUEST) {
-    if(!id || x>3 || (x==3 && (y || uiPage!=APP_PAGE_POSITION)) || (x==2 && (y || uiPage!=APP_PAGE_WAVE)) || (x==0 && y>APP_PAGE_POSITION) ||
+    if(!id || x>4 || (x==4 && (y || uiPage!=APP_PAGE_CLAP)) || (x==3 && (y || uiPage!=APP_PAGE_POSITION)) || (x==2 && (y || uiPage!=APP_PAGE_WAVE)) || (x==0 && y>APP_PAGE_POSITION) ||
        (x==1 && (y>600 || y%5))) goto reject;
     if(!uiLastRequest || (id!=uiLastRequest && id-uiLastRequest<0x80000000UL)) {
       /* Request values are absolute, so duplicates cannot double-step temperature. */
@@ -364,6 +408,28 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
     if(waveClockId && (id==waveClockId || id-waveClockId>=0x80000000UL)) return;
     waveClockId=id; wavePeriodPs=x; waveOriginNs=y; waveCalMs=(uint32_t)z;
     return;
+  }
+  if(type==CLAP_EVENT || type==CLAP_RESULT) {
+    uint64_t current;
+    if(uiPage!=APP_PAGE_CLAP || !AppRange_SettingsReady() ||
+       !AppRange_MasterTime(&current) || G32(bytes+72)!=uiRevision ||
+       epoch!=(APP_BOARD_ROLE==APP_BOARD_A ? peerEpoch : syncEpoch)) goto reject;
+    if(type==CLAP_EVENT && APP_BOARD_ROLE==APP_BOARD_A) {
+      if(!x || x>current || current-x>1000000000ULL || y>1000) goto reject;
+      if(clapRemoteId && (id==clapRemoteId || id-clapRemoteId>=0x80000000UL)) return;
+      clapRemoteId=id;clapRemote=x;clapRemoteQ=(uint32_t)y;
+      clapRemoteMs=now;clapHaveRemote=1;++appClapStatus.received;return;
+    }
+    if(type==CLAP_RESULT && APP_BOARD_ROLE==APP_BOARD_B) {
+      if(x>300 || y>2 || z>1000 || !ClapHistoryValid(G64(bytes+56),(uint32_t)x)) goto reject;
+      if(clapReceivedId && (id==clapReceivedId || id-clapReceivedId>=0x80000000UL)) return;
+      clapReceivedId=id;++appClapStatus.received;appClapStatus.distanceCm=(uint32_t)x;
+      appClapStatus.recentCount=(uint8_t)(G64(bytes+56)>>54);
+      for(i=0;i<6;++i) appClapStatus.recentCm[i]=(uint16_t)((G64(bytes+56)>>(9*i))&511U);
+      appClapStatus.direction=y==1 ? 1 : (y==2 ? -1:0);
+      appClapStatus.quality=(uint32_t)z;appClapStatus.updatedMs=now;appClapStatus.valid=1;return;
+    }
+    goto reject;
   }
   if(type==POSITION_EVENT || type==POSITION_RESULT) {
     uint64_t current;
@@ -736,6 +802,8 @@ static void WaveObserve(void)
       memset(positionCalSum,0,sizeof(positionCalSum));memset(positionCalSquare,0,sizeof(positionCalSquare));
       appPositionStatus.calibrationCount=0;
       if(appPositionStatus.calibration!=1) appPositionStatus.calibration=0;
+    } else if(uiPage==APP_PAGE_CLAP) {
+      uint32_t drops=appClapStatus.drops+1;ClapReset();appClapStatus.drops=drops;
     } else WaveReset();
     RangeAudioTime_Reset(&audioTime);
     appRangeStatus.audioTimeReady=0;
@@ -820,6 +888,83 @@ int AppRange_WaveRead(uint64_t presentMasterNs,int16_t *out,unsigned points)
     count=audioCount; __set_PRIMASK(mask);
     /* New DMA data does not invalidate an untouched historical window. */
     return epoch==audioEpoch && count-base<AUDIO_RING;
+  }
+}
+
+static void ClapProcess(void)
+{
+  uint64_t count,start=RangeClock_Now(),anchorSample;uint32_t mask,epoch,n;
+  if(!AppRange_SettingsReady() || !appRangeStatus.locked || !audioTime.ready) {
+    appClapStatus.ready=0;return;
+  }
+  mask=__get_PRIMASK();__disable_irq();count=audioCount;epoch=audioEpoch;__set_PRIMASK(mask);
+  if(epoch!=clapEpoch || count-clapCursor>AUDIO_RING-APP_AUDIO_HALF_FRAMES) {
+    uint32_t drops=appClapStatus.drops+1;ClapReset();appClapStatus.drops=drops;return;
+  }
+  anchorSample=audioTime.sample[(audioTime.next+31U)%32U];
+  for(n=0;n<4096 && clapCursor<count;++n,++clapCursor) {
+    uint64_t onset;uint32_t quality;int found;
+    if(n && !(n&63U) && RangeClock_Now()-start>=1500000ULL) break;
+    found=Clap_Push(&clapDetector,audioRing[(uint32_t)clapCursor&(AUDIO_RING-1U)],clapCursor,&onset,&quality);
+    if(found<0) ++appClapStatus.rejected;
+    if(found>0) {
+      double stamp=audioTime.anchorNs+((double)onset-(double)anchorSample)*audioTime.periodNs;
+      __DMB();mask=__get_PRIMASK();__disable_irq();
+      { uint64_t newest=audioCount;__set_PRIMASK(mask);
+        if(epoch!=audioEpoch || newest-clapCursor>=AUDIO_RING) {
+          uint32_t drops=appClapStatus.drops+1;ClapReset();appClapStatus.drops=drops;return;
+        }
+      }
+      if(APP_BOARD_ROLE==APP_BOARD_B) stamp=stamp-syncModel.offset-syncModel.slope*(stamp-syncModel.origin);
+      clapLocal=(uint64_t)(stamp+0.5);clapLocalQ=quality;clapHaveLocal=1;
+      clapEventId=++sequence;clapEventMs=HAL_GetTick();clapSendMs=clapEventMs-150U;
+      ++appClapStatus.events;appClapStatus.arrivalUs=clapLocal/1000U;
+      AppCapture_Log("clap_event,%lu,%llu,%lu\n",(unsigned long)clapEventId,
+        (unsigned long long)clapLocal,(unsigned long)quality);
+      ++clapCursor;break;
+    }
+  }
+  appClapStatus.noise=(uint32_t)clapDetector.noise;
+  appClapStatus.ready=(uint8_t)(clapDetector.warm>=APP_AUDIO_SAMPLE_RATE/2U);
+}
+static void ClapNetwork(uint32_t now)
+{
+  if(uiPage!=APP_PAGE_CLAP || !AppRange_SettingsReady() || !appRangeStatus.locked) {
+    appClapStatus.valid=appClapStatus.ready=0;return;
+  }
+  if(appClapStatus.valid && now-appClapStatus.updatedMs>10000U) appClapStatus.valid=0;
+  if(clapHaveLocal && now-clapEventMs>1000U) clapHaveLocal=0;
+  if(clapHaveRemote && now-clapRemoteMs>1000U) clapHaveRemote=0;
+  if(APP_BOARD_ROLE==APP_BOARD_B) {
+    if(clapHaveLocal && now-clapSendMs>=100U) {
+      clapSendMs=now;Send(CLAP_EVENT,clapEventId,syncEpoch,clapLocal,clapLocalQ,0,0,0);
+    }
+  } else {
+    if(clapHaveLocal && clapHaveRemote) {
+      int64_t delta=(int64_t)clapRemote-(int64_t)clapLocal;
+      if(delta>10000000) clapHaveLocal=0;
+      else if(delta< -10000000) clapHaveRemote=0;
+      else {
+        uint64_t magnitude=(uint64_t)(delta<0 ? -delta:delta);
+        float cm=(float)magnitude*(331.3f+0.0606f*temperature)/10000000.0f;
+        clapHaveLocal=clapHaveRemote=0;
+        if(cm>300) { ++appClapStatus.rejected;return; }
+        appClapStatus.distanceCm=(uint32_t)(cm+0.5f);
+        ClapRecord(appClapStatus.distanceCm);
+        appClapStatus.direction=magnitude>100000U+appRangeStatus.syncErrorNs ? (delta>0 ? 1:-1):0;
+        appClapStatus.quality=clapLocalQ<clapRemoteQ ? clapLocalQ:clapRemoteQ;
+        appClapStatus.updatedMs=now;appClapStatus.valid=1;
+        clapResultId=++sequence;clapResultMs=now;clapSendMs=now-150U;
+        AppCapture_Log("clap_result,%lu,%ld,%lu,%ld,%lu\n",(unsigned long)clapResultId,
+          (long)(delta/1000),(unsigned long)appClapStatus.distanceCm,
+          (long)appClapStatus.direction,(unsigned long)appClapStatus.quality);
+      }
+    }
+    if(clapResultId && now-clapResultMs<1000U && now-clapSendMs>=100U) {
+      clapSendMs=now;
+      Send(CLAP_RESULT,clapResultId,peerEpoch,appClapStatus.distanceCm,
+           appClapStatus.direction>0 ? 1 : (appClapStatus.direction<0 ? 2:0),appClapStatus.quality,ClapHistoryPack(),0);
+    }
   }
 }
 
@@ -1104,8 +1249,9 @@ void AppRange_Process(void)
     if(RangingEnabled()) AudioProcess(); /* Never run DSP in the DMA ISR. */
     else {
       uint32_t mask=__get_PRIMASK();
-      if(uiPage==APP_PAGE_WAVE || uiPage==APP_PAGE_POSITION) WaveObserve();
+      if(uiPage==APP_PAGE_WAVE || uiPage==APP_PAGE_POSITION || uiPage==APP_PAGE_CLAP) WaveObserve();
       if(uiPage==APP_PAGE_POSITION) PositionProcess();
+      if(uiPage==APP_PAGE_CLAP) ClapProcess();
       __disable_irq(); readSample=audioCount; seenEpoch=audioEpoch; __set_PRIMASK(mask);
       haveWindow=0; lastDetection=0;
     }
@@ -1139,7 +1285,7 @@ void AppRange_Process(void)
     return;
   }
   UiProcess(now);
-  PositionNetwork(now);
+  PositionNetwork(now);ClapNetwork(now);
   if(APP_BOARD_ROLE==APP_BOARD_A && uiPage==APP_PAGE_WAVE && appRangeStatus.locked &&
      AppRange_SettingsReady() && now-waveSendMs>=250U) {
     waveSendMs=now;

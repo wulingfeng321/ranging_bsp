@@ -4,6 +4,8 @@
 #include <math.h>
 #include "../../Core/Src/app_mic_scope.c"
 static int busy;
+static unsigned clapClears;
+int AppRange_ClearClapStats(void) { if(busy || !AppRange_SettingsReady()) return 0; ++clapClears;memset(&appClapStatus,0,sizeof(appClapStatus));return 1; }
 int AppCapture_Busy(void) { return busy; }
 const char *AppCapture_Text(void) { return "CAP HELD / A USER"; }
 const char *AppCapture_Detail(void) { return ""; }
@@ -17,6 +19,7 @@ TestLtdc testLtdc;
 AppNetStatus appNetStatus;
 AppRangeStatus appRangeStatus;
 AppPositionStatus appPositionStatus;
+AppClapStatus appClapStatus;
 AppRangeArrival appRangeArrival;
 RangeDspDiagnostics rangeDspDiagnostics;
 static uint64_t masterClock;
@@ -161,8 +164,17 @@ int main(int argc,char **argv)
   appRangeStatus.pairFailure.bestSpanNs=40000; appRangeStatus.pairFailure.runnerSpanNs=40000;
   Draw(HAL_GetTick(),page); assert(strstr(screenText,"FAIL#9999") && strstr(screenText,"NEXT:"));
   if(argc>1) Save(argv[1],"diagnostics");
-  page=APP_PAGE_CLAP; Draw(HAL_GetTick(),page); assert(strstr(screenText,"DEMO ONLY"));
+  page=APP_PAGE_CLAP; Draw(HAL_GetTick(),page); assert(strstr(screenText,"CLAP / SINGLE SHOT") && strstr(screenText,"-- cm"));
+  appClapStatus.valid=appClapStatus.ready=1;appClapStatus.updatedMs=HAL_GetTick();
+  appClapStatus.distanceCm=130;appClapStatus.direction=1;appClapStatus.quality=850;
+  Draw(HAL_GetTick(),page);assert(strstr(screenText,"130 cm") && strstr(screenText,"SOURCE: A SIDE"));
+  appClapStatus.recentCount=6;
+  for(i=0;i<6;++i) appClapStatus.recentCm[i]=(uint16_t)(128+i);
+  Draw(HAL_GetTick(),page);assert(strstr(screenText,"AVG(6): 130.5 cm"));
+  assert(!strstr(screenText,"LOCAL ARRIVAL") && !strstr(screenText,"TARGET") && !strstr(screenText,"HOLD"));
   if(argc>1) Save(argv[1],"clap");
+  appClapStatus.direction=-1;Draw(HAL_GetTick(),page);assert(strstr(screenText,"SOURCE: B SIDE"));
+  appClapStatus.valid=0;Draw(HAL_GetTick(),page);assert(strstr(screenText,"-- cm"));
   page=APP_PAGE_WAVE; Draw(HAL_GetTick(),page); assert(strstr(screenText,"LOCAL MIC L / LIVE") && strstr(screenText,"TONE LOCK 500.000"));
   assert(!strstr(screenText,"SAVE:") && !strstr(screenText,"CAP HELD"));
   if(argc>1) Save(argv[1],"wave");
@@ -184,6 +196,15 @@ int main(int argc,char **argv)
   Step(10500);assert(flips==before+1);
   testLtdc.SRCR=0;Step(10969);assert(!framePending);
   Step(10970);assert(framePending);
+  testLtdc.SRCR=0;page=APP_PAGE_CLAP;drawnPage=page;dirty=1;
+  Step(11020);assert(!framePending && presentAt==11100000000ULL);
+  Step(11070);assert(framePending);before=flips;
+  Step(11100);assert(flips==before+1);
+  testLtdc.SRCR=0;Step(11169);assert(!framePending);
+  Step(11170);assert(framePending);
+  Release(11200);Press(11300,400,250);assert(clapClears==1);
+  Touch(11400);assert(clapClears==1);
+  Release(11500);busy=1;Press(11600,400,250);assert(clapClears==1);busy=0;
   touchFail=1; Touch(12000); assert(!touchReady && dirty);
   puts("PASS: actual LCD bounds, four pages, expiry, touch debounce, shared cadence, stale-frame discard");
   return 0;
