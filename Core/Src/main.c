@@ -18,28 +18,13 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "adc.h"
-#include "crc.h"
-#include "dcmi.h"
-#include "dma2d.h"
 #include "fatfs.h"
-#include "i2c.h"
-#include "ltdc.h"
-#include "lwip.h"
-#include "quadspi.h"
-#include "rtc.h"
-#include "sai.h"
-#include "sdmmc.h"
-#include "spdifrx.h"
-#include "spi.h"
 #include "tim.h"
-#include "usart.h"
-#include "usb_otg.h"
 #include "gpio.h"
-#include "fmc.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "lwip.h"
 #include "app_capture.h"
 #include "app_net.h"
 #include "app_range.h"
@@ -184,9 +169,9 @@ int main(void)
 
   /* USER CODE END SysInit */
 
-  /* Initialize only peripherals owned directly by the application. */
-  MX_TIM2_Init(); /* D9 / PA15 sync-check pulse; output stays low until lock. */
+  /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   /* BSP owns LCD/audio/SDRAM startup; capture owns on-demand SD startup.
    * Keep this ownership and the TIM2/GPIO list above after CubeMX generation. */

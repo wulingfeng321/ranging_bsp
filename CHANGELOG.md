@@ -39,6 +39,7 @@
 
 ## 2. 功能日志索引
 
+- [2026-09-30 CubeMX初始化调用配置核对](commit_logs/2026-09-30-cubemx-init-config.md)：生成区仅启动GPIO/TIM2，保留时钟与用户区网络初始化，补入用户区lwip头文件，A/B构建通过。
 - [2026-09-30 release工程整理检查点](commit_logs/2026-09-30-release-structure.md)：汇总依赖内置、main初始化清理、CubeMX工具链配置及IDE状态取消跟踪，创建release分支保存当前改动。
 - [2026-09-30 移除早期UI演示初始化开关](commit_logs/2026-09-30-main-init-cleanup.md)：删除LCD_GRID_DEMO_ONLY及旧分支，保留当前启动调用顺序，A/B构建0错误0警告。
 - [2026-09-30 BSP与字体依赖收齐](commit_logs/2026-09-30-local-dependencies.md)：依赖纳入Drivers，更新IAR及LCD字体引用，当前与隔离目录A/B构建均0错误0警告。
