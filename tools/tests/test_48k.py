@@ -5,6 +5,7 @@ import ctypes as c
 import sys
 import wave
 from pathlib import Path
+from audio_paths import standard_audio
 import numpy as np
 from analyze_joint_detector import DspPeaks, Peaks
 
@@ -19,7 +20,7 @@ FS, WINDOW, PULSE, STEP, ADVANCE, SLICE = 48000, 6912, 1536, 1920, 768, 192
 NS = 1e9 / FS
 DELAY = 378546
 root = Path(__file__).resolve().parents[2]
-with wave.open(str(root / 'tools/test_audio_chirp_48k_repeat.wav')) as wav:
+with wave.open(str(standard_audio(48000))) as wav:
     assert (wav.getframerate(), wav.getnchannels(), wav.getsampwidth()) == (FS, 1, 2)
     audio = np.frombuffer(wav.readframes(wav.getnframes()), dtype='<i2').astype(int)
 assert len(audio) == FS * 31 // 2

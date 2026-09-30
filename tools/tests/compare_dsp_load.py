@@ -4,6 +4,7 @@ import json
 import sys
 import wave
 from pathlib import Path
+from audio_paths import standard_audio
 import numpy as np
 from analyze_joint_detector import DspPeaks
 
@@ -12,7 +13,6 @@ report = []
 for rate in (16000, 48000):
     scale = rate//16000
     size, advance, step = 2304*scale, 256*scale, 64*scale
-    suffix = '_48k' if scale==3 else ''
     lib = c.CDLL(str(Path(sys.argv[1]) / f'joint{rate}.dll'))
     assert lib.Test_SampleRate()==rate
     lib.RangeDsp_Find.argtypes = [c.POINTER(c.c_int16), c.c_uint, c.c_uint,
@@ -20,7 +20,7 @@ for rate in (16000, 48000):
     lib.RangeDsp_Candidates.argtypes = [c.POINTER(c.c_int16), c.c_float, c.POINTER(DspPeaks)]
     lib.Test_MacCount.argtypes = [c.c_int]
     lib.Test_MacCount.restype = c.c_uint64
-    with wave.open(str(root / f'tools/test_audio_chirp{suffix}_repeat.wav')) as w:
+    with wave.open(str(standard_audio(rate))) as w:
         audio = np.frombuffer(w.readframes(w.getnframes()), dtype='<i2').astype(int)
     stream = np.concatenate((np.zeros(127*scale, dtype=int), audio, np.zeros(size, dtype=int)))
     pos, q, peaks = c.c_float(), c.c_uint32(), DspPeaks()

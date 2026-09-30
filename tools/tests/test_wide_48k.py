@@ -3,13 +3,14 @@ import ctypes as c
 import sys
 import wave
 from pathlib import Path
+from audio_paths import wide_audio
 import numpy as np
 
 lib = c.CDLL(sys.argv[1])
 lib.RangeDsp_Find.argtypes = [c.POINTER(c.c_int16), c.c_uint, c.c_uint,
                             c.POINTER(c.c_float), c.POINTER(c.c_uint32)]
 root = Path(__file__).resolve().parents[2]
-with wave.open(str(root / 'tools/test_audio_wide_48k_repeat.wav')) as w:
+with wave.open(str(wide_audio(48000))) as w:
     assert w.getframerate() == 48000 and w.getnframes() == 744000
     audio = np.frombuffer(w.readframes(w.getnframes()), dtype='<i2').astype(int)
 assert not np.any(audio[504000:])

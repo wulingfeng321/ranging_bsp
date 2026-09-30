@@ -6,6 +6,10 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $out = Join-Path ([IO.Path]::GetTempPath()) 'ranging-host-tests'
 [void][IO.Directory]::CreateDirectory($out)
 if (!(Test-Path -LiteralPath $VcVars)) { throw "Pass -VcVars with your MSVC vcvars64.bat path" }
+& python (Join-Path $PSScriptRoot 'test_audio_tools.py')
+if ($LASTEXITCODE -ne 0) { throw 'Audio generator tests failed' }
+& python (Join-Path $root 'tools/audio/generate.py') all --regression
+if ($LASTEXITCODE -ne 0) { throw 'Audio fixture generation failed' }
 $commands = @('@echo off', "call `"$VcVars`" >nul", "cd /d `"$root`"")
 $common = "/nologo /utf-8 /O2 /Itools/tests/net_stubs /ICore/Inc /Fo`"$out/`""
 foreach ($rate in 16000,48000) {

@@ -4,6 +4,7 @@ Usage: python test_range_math.py path/to/range_math.dll
 import ctypes as c
 import math, random, struct, sys, wave
 from pathlib import Path
+from audio_paths import standard_audio, wide_audio
 lib=c.CDLL(sys.argv[1])
 class Sync(c.Structure):
     _fields_=[('x',c.c_double*16),('y',c.c_double*16),('origin',c.c_double),
@@ -17,7 +18,7 @@ lib.RangeSync_Master.restype=c.c_uint64
 lib.RangeDsp_Find.argtypes=[c.POINTER(c.c_int16),c.c_uint,c.c_uint,c.POINTER(c.c_float),c.POINTER(c.c_uint32)]
 lib.RangeDsp_Distance.argtypes=[c.c_int64,c.c_int32,c.POINTER(c.c_uint32),c.POINTER(c.c_int32)]
 root=Path(__file__).resolve().parents[2]
-with wave.open(str(root/'tools/test_audio_chirp.wav'),'rb') as w:
+with wave.open(str(standard_audio(16000, group=True)),'rb') as w:
     samples=struct.unpack('<'+'h'*w.getnframes(),w.readframes(w.getnframes()))
 sig=samples[:1792]
 rng=random.Random(123)
@@ -39,13 +40,13 @@ assert find([int(12000*math.sin(i*2*math.pi*4000/16000)) for i in range(2048)]) 
 wrong=list(sig); wrong[640:1152]=sig[:512]
 assert find(wrong+[0]*256) is None
 assert find(list(sig[:512])+[0]*(2048-512)) is None
-with wave.open(str(root/'tools/test_audio_wide_repeat.wav'),'rb') as w:
+with wave.open(str(wide_audio(16000)),'rb') as w:
     wide=struct.unpack('<'+'h'*2048,w.readframes(2048))
 assert find(wide) is None # Wrong audio profile must not produce a legacy event.
 
 # Scan the entire three-repeat WAV using the firmware's 256-sample advance
 # and 4000-sample refractory period, including all inter-group silence.
-with wave.open(str(root/'tools/test_audio_chirp_repeat.wav'),'rb') as w:
+with wave.open(str(standard_audio(16000)),'rb') as w:
     assert (w.getframerate(),w.getnchannels(),w.getsampwidth())==(16000,1,2)
     repeat=struct.unpack('<'+'h'*w.getnframes(),w.readframes(w.getnframes()))
 expected=[group*64000+i*8000 for group in range(3) for i in range(5)]

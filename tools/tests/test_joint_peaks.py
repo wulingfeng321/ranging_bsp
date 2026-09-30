@@ -6,6 +6,7 @@ import struct
 import sys
 import wave
 from pathlib import Path
+from audio_paths import standard_audio
 lib=c.CDLL(sys.argv[1])
 assert lib.Test_SampleRate()==16000, "This regression suite requires a 16 kHz host library; use test_48k.py for 48 kHz"
 class DspPeak(c.Structure):
@@ -44,7 +45,7 @@ for offsets in [[-1000125,123456,20000],[-8191750,0,8191750]]:
 assert not lib.Test_Unpack(0,c.byref(Peak()))
 print('PASS: unique/negative delay, 13-vs-18 ambiguity, pulse inconsistency, overflow, wire codec')
 root=Path(__file__).resolve().parents[2]
-with wave.open(str(root/'tools/test_audio_chirp_repeat.wav')) as w:
+with wave.open(str(standard_audio(16000))) as w:
     audio=list(struct.unpack('<'+'h'*w.getnframes(),w.readframes(w.getnframes())))
 sig=audio[:1792]; rng=random.Random(97)
 def detect(values):
@@ -119,4 +120,4 @@ for offset in [0,17,127,254]:
             assert got[1].count,(base,got)
             hits.append(base+got[0])
     assert len(hits)==15,(offset,hits)
-print('PASS: 15 candidate events from full old repeat WAV at four alignments')
+print('PASS: 15 candidate events from standard repeat WAV at four alignments')

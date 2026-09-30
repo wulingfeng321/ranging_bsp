@@ -2,6 +2,7 @@
 import ctypes as c
 import math
 from pathlib import Path
+from audio_paths import GENERATED
 import random
 import struct
 import sys
@@ -13,11 +14,11 @@ lib.RangeDsp_Find.argtypes = [c.POINTER(c.c_int16), c.c_uint, c.c_uint,
                             c.POINTER(c.c_float), c.POINTER(c.c_uint32)]
 
 def read(name):
-    with wave.open(str(ROOT / 'tools' / name)) as w:
+    with wave.open(str(GENERATED / name)) as w:
         assert (w.getframerate(), w.getnchannels(), w.getsampwidth()) == (16000, 1, 2)
         return list(struct.unpack('<' + 'h'*w.getnframes(), w.readframes(w.getnframes())))
 
-audio = read('test_audio_wide_repeat.wav')
+audio = read('wide_repeat_16000hz_15p5s.wav')
 signature = audio[:1664]
 rng = random.Random(42)
 
@@ -79,7 +80,7 @@ for _ in range(30):
 for freq in [1500, 2000, 3000, 4000, 6000, 6500]:
     assert find([round(10000*math.sin(i*2*math.pi*freq/16000)) for i in range(2048)]) is None
 assert find(signature[:512]+[0]*(2048-512)) is None
-assert find(read('test_audio_chirp.wav')[:2048]) is None
+assert find(read('standard_group_16000hz_2p5s.wav')[:2048]) is None
 wrong = signature[:]
 wrong[576:1088] = signature[:512]
 assert find(wrong+[0]*(2048-len(wrong))) is None
