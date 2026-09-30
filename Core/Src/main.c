@@ -54,9 +54,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* BSP owns LCD/audio startup. Skip unrelated generated peripherals (e.g. SD).
- * Ethernet is initialized independently below in either mode. */
-#define LCD_GRID_DEMO_ONLY  1
 #define LCD_GRID_STEP       20U
 #define LCD_GRID_LAYER      0U
 /* USER CODE END PD */
@@ -184,69 +181,15 @@ int main(void)
   PeriphCommonClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  /* Keep the BSP display/audio and Ethernet test independent of an SD card.
-   * The conditional spans unrelated CubeMX peripheral startup calls. */
-#if !LCD_GRID_DEMO_ONLY
+
   /* USER CODE END SysInit */
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_ADC3_Init();
-  MX_CRC_Init();
-  MX_DCMI_Init();
-  MX_DMA2D_Init();
-  MX_FMC_Init();
-  MX_I2C1_Init();
-  MX_I2C3_Init();
-  MX_LTDC_Init();
-  MX_QUADSPI_Init();
-  MX_RTC_Init();
-  MX_SAI2_Init();
-  MX_SDMMC1_SD_Init();
-  MX_SPDIFRX_Init();
-  MX_SPI2_Init();
-  MX_TIM1_Init();
-  MX_TIM2_Init();
-  MX_TIM3_Init();
-  MX_TIM5_Init();
-  MX_TIM8_Init();
-  MX_TIM12_Init();
-  MX_USART1_UART_Init();
-  MX_USART6_UART_Init();
-  MX_FATFS_Init();
-  MX_USB_OTG_FS_HCD_Init();
-  MX_LWIP_Init();
-  /* USER CODE BEGIN 2 */
-#else
-  /* Generated init functions remain available for later CubeMX work.
-   * These references make the intentionally unused functions explicit;
-   * no peripheral is started by a function-designator expression. */
-  (void)MX_ADC3_Init;
-  (void)MX_CRC_Init;
-  (void)MX_DCMI_Init;
-  (void)MX_DMA2D_Init;
-  /* LwIP now initializes ETH through ethernetif.c; MX_ETH_Init no longer exists. */
-  (void)MX_FMC_Init;
-  (void)MX_I2C1_Init;
-  (void)MX_I2C3_Init;
-  (void)MX_LTDC_Init;
-  (void)MX_QUADSPI_Init;
-  (void)MX_RTC_Init;
-  (void)MX_SAI2_Init;
-  (void)MX_SDMMC1_SD_Init;
-  (void)MX_SPDIFRX_Init;
-  (void)MX_SPI2_Init;
-  (void)MX_TIM1_Init;
+  /* Initialize only peripherals owned directly by the application. */
   MX_TIM2_Init(); /* D9 / PA15 sync-check pulse; output stays low until lock. */
-  (void)MX_TIM3_Init;
-  (void)MX_TIM5_Init;
-  (void)MX_TIM8_Init;
-  (void)MX_TIM12_Init;
-  (void)MX_USART1_UART_Init;
-  (void)MX_USART6_UART_Init;
-  (void)MX_USB_OTG_FS_HCD_Init;
   MX_GPIO_Init();
-#endif
+  /* USER CODE BEGIN 2 */
+  /* BSP owns LCD/audio/SDRAM startup; capture owns on-demand SD startup.
+   * Keep this ownership and the TIM2/GPIO list above after CubeMX generation. */
   MX_LWIP_Init();
   AppNet_Init();
   AppRange_Init();

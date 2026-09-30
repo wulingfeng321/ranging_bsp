@@ -39,6 +39,9 @@
 
 ## 2. 功能日志索引
 
+- [2026-09-30 release工程整理检查点](commit_logs/2026-09-30-release-structure.md)：汇总依赖内置、main初始化清理、CubeMX工具链配置及IDE状态取消跟踪，创建release分支保存当前改动。
+- [2026-09-30 移除早期UI演示初始化开关](commit_logs/2026-09-30-main-init-cleanup.md)：删除LCD_GRID_DEMO_ONLY及旧分支，保留当前启动调用顺序，A/B构建0错误0警告。
+- [2026-09-30 BSP与字体依赖收齐](commit_logs/2026-09-30-local-dependencies.md)：依赖纳入Drivers，更新IAR及LCD字体引用，当前与隔离目录A/B构建均0错误0警告。
 - [2026-09-30 文档与工具整理](commit_logs/2026-09-30-docs-tools-cleanup.md)：重排用户手册、更新工程状态与README、引用页面预览、明确后续计划，清理并统一PC音频工具。
 - [2026-09-30 音频生成工具统一](commit_logs/2026-09-30-audio-tools.md)：统一生成/模板导出入口与命名，重生成播放音和回归输入，PCM与固件模板一致，主机回归通过。
 
