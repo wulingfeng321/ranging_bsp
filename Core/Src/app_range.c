@@ -1,4 +1,4 @@
-#include "app_wire.h"
+#include "app_range_protocol.h"
 #include "app_range.h"
 #include "app_capture.h"
 #include "app_board_config.h"
@@ -26,30 +26,7 @@ static uint64_t batchFirstEventNs, batchLastEventNs;
 #include "lwip/etharp.h"
 #include <string.h>
 
-#define WIRE_SIZE 76U
-#define SYNC_REQ 1U
-#define SYNC_RESP 2U
-#define SYNC_FOLLOW 3U
-#define SYNC_STATE 4U
-#define EVENT 5U
-#define RESULT 6U
-#define ACK 7U
-#define BATCH_STATE 8U
-#define PEAK_EVENT 9U
-#define PEAK_STATE 10U
-#define PEAK_DIAG 11U
-#define UI_STATE 12U
-#define UI_REQUEST 13U
-#define UI_ACK 14U
-#define WAVE_CLOCK 15U
-#define POSITION_EVENT 16U
-#define POSITION_RESULT 17U
-#define CLAP_EVENT 18U
-#define CLAP_RESULT 19U
-#define AUTO_STATUS_REQUEST 20U
-#define AUTO_STATUS_STATE 21U
 #define AUDIO_RING 32768U
-#define RANGE_WIRE_VERSION 12U
 extern struct netif gnetif;
 AppRangeStatus appRangeStatus;
 AppRangeArrival appRangeArrival;
@@ -144,7 +121,8 @@ static uint32_t txResultMm, txResultQuality, txResultSide, txResultKind;
 static uint64_t Send(uint8_t type, uint32_t id, uint32_t epoch,
                      uint64_t x, uint64_t y, uint64_t z, uint64_t u, uint64_t v)
 {
-  uint8_t bytes[WIRE_SIZE] = {'R','A','N','2',RANGE_WIRE_VERSION,0,APP_BOARD_ROLE,WIRE_SIZE};
+  uint8_t bytes[APP_RANGE_WIRE_SIZE];
+  AppRangePacket packet;
   struct pbuf *p;
   struct eth_addr *mac;
   const ip4_addr_t *ip;
@@ -153,13 +131,14 @@ static uint64_t Send(uint8_t type, uint32_t id, uint32_t epoch,
   if (!appNetStatus.online || pcb == NULL) return 0;
   if (etharp_find_addr(&gnetif, ip_2_ip4(&peer), &mac, &ip) < 0)
   { etharp_request(&gnetif, ip_2_ip4(&peer)); return 0; }
-  bytes[5]=type; AppWire_Put64BE(bytes+8,AppNet_LocalSession()); AppWire_Put64BE(bytes+16,AppNet_PeerSession());
-  AppWire_Put32BE(bytes+24,id); AppWire_Put32BE(bytes+28,epoch);
-  AppWire_Put64BE(bytes+32,x); AppWire_Put64BE(bytes+40,y); AppWire_Put64BE(bytes+48,z); AppWire_Put64BE(bytes+56,u); AppWire_Put64BE(bytes+64,v);
-  AppWire_Put32BE(bytes+72,uiRevision);
-  p=pbuf_alloc(PBUF_TRANSPORT,WIRE_SIZE,PBUF_RAM);
+  packet.type=type;packet.role=APP_BOARD_ROLE;
+  packet.senderSession=AppNet_LocalSession();packet.receiverSession=AppNet_PeerSession();
+  packet.id=id;packet.epoch=epoch;packet.revision=uiRevision;
+  packet.payload[0]=x;packet.payload[1]=y;packet.payload[2]=z;packet.payload[3]=u;packet.payload[4]=v;
+  AppRangeProtocol_Encode(bytes,&packet);
+  p=pbuf_alloc(PBUF_TRANSPORT,APP_RANGE_WIRE_SIZE,PBUF_RAM);
   if (!p) return 0;
-  err=pbuf_take(p,bytes,WIRE_SIZE); stampSerial=rangeTxStampSerial;
+  err=pbuf_take(p,bytes,APP_RANGE_WIRE_SIZE); stampSerial=rangeTxStampSerial;
   if (err==ERR_OK) err=udp_sendto(pcb,p,&peer,APP_RANGE_PORT);
   pbuf_free(p);
   return err==ERR_OK && rangeTxStampSerial!=stampSerial ? rangeTxTimestamp : 0;
@@ -284,13 +263,13 @@ static void UiProcess(uint32_t now)
   if(now-uiLastSend<250U) return;
   uiLastSend=now;
   if(APP_BOARD_ROLE==APP_BOARD_A)
-    Send(AUTO_STATUS_STATE,autoSerial,0,autoStatus,autoSeenRequest,0,0,0);
+    Send(APP_RANGE_MSG_AUTO_STATUS_STATE,autoSerial,0,autoStatus,autoSeenRequest,0,0,0);
   else if(autoPendingId)
-    Send(AUTO_STATUS_REQUEST,autoPendingId,0,autoPendingStatus,0,0,0,0);
+    Send(APP_RANGE_MSG_AUTO_STATUS_REQUEST,autoPendingId,0,autoPendingStatus,0,0,0,0);
   if(APP_BOARD_ROLE==APP_BOARD_A)
-    Send(UI_STATE,uiRevision,0,(uint64_t)(temperature+100),uiPage,syncOriginNs,peerEpoch,uiLastRequest);
+    Send(APP_RANGE_MSG_UI_STATE,uiRevision,0,(uint64_t)(temperature+100),uiPage,syncOriginNs,peerEpoch,uiLastRequest);
   else if(uiPendingId)
-    Send(UI_REQUEST,uiPendingId,0,uiRequestKind,uiRequestValue,0,0,0);
+    Send(APP_RANGE_MSG_UI_REQUEST,uiPendingId,0,uiRequestKind,uiRequestValue,0,0,0);
 }
 
 void AppRange_ResetRound(void)
@@ -324,30 +303,31 @@ static void DisplayResult(uint32_t id, uint32_t mm, uint32_t side, uint32_t qual
 static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
                     const ip_addr_t *addr, u16_t port)
 {
-  uint8_t bytes[WIRE_SIZE], type;
+  uint8_t bytes[APP_RANGE_WIRE_SIZE], type;
+  AppRangePacket packet;
   uint32_t id, epoch, now=HAL_GetTick(), i;
   uint64_t x,y,z,rx=rangeRxTimestamp,tx;
   (void)arg; (void)socket;
   if (!p) return;
   if(AppCapture_Busy()) { pbuf_free(p);return; }
   if (!appNetStatus.online || port!=APP_RANGE_PORT || !ip_addr_cmp(addr,&peer) ||
-      p->tot_len!=WIRE_SIZE || pbuf_copy_partial(p,bytes,WIRE_SIZE,0)!=WIRE_SIZE)
+      p->tot_len!=APP_RANGE_WIRE_SIZE || pbuf_copy_partial(p,bytes,APP_RANGE_WIRE_SIZE,0)!=APP_RANGE_WIRE_SIZE)
   { pbuf_free(p); ++appRangeStatus.rejected; return; }
   pbuf_free(p);
-  if (memcmp(bytes,"RAN2",4) || bytes[4]!=RANGE_WIRE_VERSION || bytes[6]!=APP_PEER_ROLE || bytes[7]!=WIRE_SIZE ||
-      AppWire_Get64BE(bytes+8)!=AppNet_PeerSession() || AppWire_Get64BE(bytes+16)!=AppNet_LocalSession()) goto reject;
-  type=bytes[5]; id=AppWire_Get32BE(bytes+24); epoch=AppWire_Get32BE(bytes+28);
-  x=AppWire_Get64BE(bytes+32); y=AppWire_Get64BE(bytes+40); z=AppWire_Get64BE(bytes+48);
+  if(!AppRangeProtocol_Decode(&packet,bytes,sizeof(bytes),APP_PEER_ROLE,
+                              AppNet_PeerSession(),AppNet_LocalSession())) goto reject;
+  type=packet.type;id=packet.id;epoch=packet.epoch;
+  x=packet.payload[0];y=packet.payload[1];z=packet.payload[2];
   /* Feedback is independent from measurement revision: N/A must not reset
    * a running measurement. Periodic snapshots/retries survive packet loss. */
-  if(type==AUTO_STATUS_REQUEST && APP_BOARD_ROLE==APP_BOARD_A) {
+  if(type==APP_RANGE_MSG_AUTO_STATUS_REQUEST && APP_BOARD_ROLE==APP_BOARD_A) {
     if(!id || x>4) goto reject;
     if(!autoSeenRequest || (id!=autoSeenRequest && id-autoSeenRequest<0x80000000UL)) {
       autoSeenRequest=id;AutoFeedback((uint32_t)x);
     }
     uiLastSend=now-250U;return;
   }
-  if(type==AUTO_STATUS_STATE && APP_BOARD_ROLE==APP_BOARD_B) {
+  if(type==APP_RANGE_MSG_AUTO_STATUS_STATE && APP_BOARD_ROLE==APP_BOARD_B) {
     if(!id || x>4 || y>UINT32_MAX) goto reject;
     if(autoSeenState && id!=autoSeenState && id-autoSeenState>=0x80000000UL) return;
     if(autoPendingId && y!=autoPendingId) return;
@@ -355,11 +335,11 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
     if(autoPendingId && y==autoPendingId) autoPendingId=0;
     return;
   }
-  if(APP_BOARD_ROLE==APP_BOARD_A && type==UI_ACK) {
-    if(id==uiRevision && AppWire_Get32BE(bytes+72)==uiRevision) uiAckRevision=id;
+  if(APP_BOARD_ROLE==APP_BOARD_A && type==APP_RANGE_MSG_UI_ACK) {
+    if(id==uiRevision && packet.revision==uiRevision) uiAckRevision=id;
     return;
   }
-  if(APP_BOARD_ROLE==APP_BOARD_A && type==UI_REQUEST) {
+  if(APP_BOARD_ROLE==APP_BOARD_A && type==APP_RANGE_MSG_UI_REQUEST) {
     if(!id || x>4 || (x==4 && (y || uiPage!=APP_PAGE_CLAP)) || (x==3 && (y || uiPage!=APP_PAGE_POSITION)) || (x==2 && (y || uiPage!=APP_PAGE_WAVE)) || (x==0 && y>APP_PAGE_POSITION) ||
        (x==1 && (y>600 || y%5))) goto reject;
     if(!uiLastRequest || (id!=uiLastRequest && id-uiLastRequest<0x80000000UL)) {
@@ -374,66 +354,66 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
     uiLastSend=now-250U;
     return;
   }
-  if(APP_BOARD_ROLE==APP_BOARD_B && type==UI_STATE) {
-    if(!id || id!=AppWire_Get32BE(bytes+72) || x>600 || x%5 || y>APP_PAGE_POSITION) goto reject;
+  if(APP_BOARD_ROLE==APP_BOARD_B && type==APP_RANGE_MSG_UI_STATE) {
+    if(!id || id!=packet.revision || x>600 || x%5 || y>APP_PAGE_POSITION) goto reject;
     if(uiKnown && id!=uiRevision && id-uiRevision>=0x80000000UL) goto reject;
     if(!uiKnown || id!=uiRevision) {
       uiRevision=id; ApplyUi((AppPage)y,(int32_t)x-100); uiKnown=1;
     }
-    if(uiPendingId && AppWire_Get64BE(bytes+64)==uiPendingId) uiPendingId=0;
-    if(appRangeStatus.locked && AppWire_Get64BE(bytes+56)==syncEpoch) syncOriginNs=z;
-    Send(UI_ACK,id,0,0,0,0,0,0);
+    if(uiPendingId && packet.payload[4]==uiPendingId) uiPendingId=0;
+    if(appRangeStatus.locked && packet.payload[3]==syncEpoch) syncOriginNs=z;
+    Send(APP_RANGE_MSG_UI_ACK,id,0,0,0,0,0,0);
     return;
   }
-  if(APP_BOARD_ROLE==APP_BOARD_B && type==WAVE_CLOCK) {
+  if(APP_BOARD_ROLE==APP_BOARD_B && type==APP_RANGE_MSG_WAVE_CLOCK) {
     if(uiPage!=APP_PAGE_WAVE || !AppRange_SettingsReady() || !appRangeStatus.locked ||
-       epoch!=syncEpoch || AppWire_Get32BE(bytes+72)!=uiRevision || z>5000) goto reject;
+       epoch!=syncEpoch || packet.revision!=uiRevision || z>5000) goto reject;
     if(!AppWave_AcceptClock(id,x,y,(uint32_t)z)) goto reject;
     return;
   }
-  if(type==CLAP_EVENT || type==CLAP_RESULT) {
+  if(type==APP_RANGE_MSG_CLAP_EVENT || type==APP_RANGE_MSG_CLAP_RESULT) {
     uint64_t current;
     if(uiPage!=APP_PAGE_CLAP || !AppRange_SettingsReady() ||
-       !AppRange_MasterTime(&current) || AppWire_Get32BE(bytes+72)!=uiRevision ||
+       !AppRange_MasterTime(&current) || packet.revision!=uiRevision ||
        epoch!=(APP_BOARD_ROLE==APP_BOARD_A ? peerEpoch : syncEpoch)) goto reject;
-    if(type==CLAP_EVENT && APP_BOARD_ROLE==APP_BOARD_A) {
+    if(type==APP_RANGE_MSG_CLAP_EVENT && APP_BOARD_ROLE==APP_BOARD_A) {
       if(!AppClap_ReceiveEvent(id,x,y,current,now)) goto reject;
       return;
     }
-    if(type==CLAP_RESULT && APP_BOARD_ROLE==APP_BOARD_B) {
-      if(!AppClap_ReceiveResult(id,x,y,z,AppWire_Get64BE(bytes+56),now)) goto reject;
+    if(type==APP_RANGE_MSG_CLAP_RESULT && APP_BOARD_ROLE==APP_BOARD_B) {
+      if(!AppClap_ReceiveResult(id,x,y,z,packet.payload[3],now)) goto reject;
       return;
     }
     goto reject;
   }
-  if(type==POSITION_EVENT || type==POSITION_RESULT) {
+  if(type==APP_RANGE_MSG_POSITION_EVENT || type==APP_RANGE_MSG_POSITION_RESULT) {
     uint64_t current;
     if(uiPage!=APP_PAGE_POSITION || !AppRange_SettingsReady() ||
-       !AppRange_MasterTime(&current) || AppWire_Get32BE(bytes+72)!=uiRevision ||
+       !AppRange_MasterTime(&current) || packet.revision!=uiRevision ||
        epoch!=(APP_BOARD_ROLE==APP_BOARD_A ? peerEpoch : syncEpoch)) goto reject;
-    if(type==POSITION_EVENT && APP_BOARD_ROLE==APP_BOARD_A) {
+    if(type==APP_RANGE_MSG_POSITION_EVENT && APP_BOARD_ROLE==APP_BOARD_A) {
       if(!AppPosition_ReceiveEvent(id,x,y,z,current)) goto reject;
       return;
     }
-    if(type==POSITION_RESULT && APP_BOARD_ROLE==APP_BOARD_B) {
-      if(!AppPosition_ReceiveResult(id,x,y,z,AppWire_Get64BE(bytes+56),AppWire_Get64BE(bytes+64),now)) goto reject;
+    if(type==APP_RANGE_MSG_POSITION_RESULT && APP_BOARD_ROLE==APP_BOARD_B) {
+      if(!AppPosition_ReceiveResult(id,x,y,z,packet.payload[3],packet.payload[4],now)) goto reject;
       return;
     }
     goto reject;
   }
   /* Clock traffic is independent of UI configuration. Every measurement packet
    * carries the setting revision so delayed results cannot cross a page/temp edit. */
-  if(type>=EVENT && type<=PEAK_DIAG &&
-     (!RangingEnabled() || AppWire_Get32BE(bytes+72)!=uiRevision)) goto reject;
+  if(type>=APP_RANGE_MSG_EVENT && type<=APP_RANGE_MSG_PEAK_DIAG &&
+     (!RangingEnabled() || packet.revision!=uiRevision)) goto reject;
   if (APP_BOARD_ROLE==APP_BOARD_A)
   {
-    if (type==SYNC_REQ && rx)
+    if (type==APP_RANGE_MSG_SYNC_REQ && rx)
     {
-      tx=Send(SYNC_RESP,id,epoch,rx,0,0,0,0);
-      if (tx) Send(SYNC_FOLLOW,id,epoch,tx,0,0,0,0);
+      tx=Send(APP_RANGE_MSG_SYNC_RESP,id,epoch,rx,0,0,0,0);
+      if (tx) Send(APP_RANGE_MSG_SYNC_FOLLOW,id,epoch,tx,0,0,0,0);
       return;
     }
-    if (type==SYNC_STATE && x<=1 && y<=500000)
+    if (type==APP_RANGE_MSG_SYNC_STATE && x<=1 && y<=500000)
     {
       if (lastStateId && (id-lastStateId==0 || id-lastStateId>=0x80000000UL)) goto reject;
       lastStateId=id;
@@ -445,7 +425,7 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
       return;
     }
 #if APP_RANGE_JOINT_PEAKS
-    if(type==PEAK_EVENT && appRangeStatus.locked && epoch==peerEpoch) {
+    if(type==APP_RANGE_MSG_PEAK_EVENT && appRangeStatus.locked && epoch==peerEpoch) {
       RangePeaks peaks;
       uint64_t masterNow=RangeClock_Now();
       uint32_t count=(uint32_t)(y&255),quality=0;
@@ -454,79 +434,79 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
          !count || count>3 || x>masterNow || masterNow-x>1500000000ULL) goto reject;
       memset(&peaks,0,sizeof(peaks)); peaks.count=count; peaks.overflow=(uint32_t)((y>>8)&1);
       for(i=0;i<3;++i) {
-        uint64_t word=AppWire_Get64BE(bytes+48+8*i);
+        uint64_t word=packet.payload[2+i];
         if(i>=count) { if(word) goto reject; continue; }
         if(!RangePeak_Unpack(word,&peaks.peak[i])) goto reject;
         if(peaks.peak[i].quality>quality) quality=peaks.peak[i].quality;
       }
       for(i=0;i<4;++i) if(remoteEvents[i].id==id && remoteEvents[i].time==x) {
-        Send(ACK,id,epoch,PEAK_EVENT,0,0,0,0); return;
+        Send(APP_RANGE_MSG_ACK,id,epoch,APP_RANGE_MSG_PEAK_EVENT,0,0,0,0); return;
       }
       remoteEvents[remoteIndex].time=x; remoteEvents[remoteIndex].id=id;
       remoteEvents[remoteIndex].quality=quality; remoteEvents[remoteIndex].received=now;
       remoteEvents[remoteIndex].peaks=peaks; remoteEvents[remoteIndex].used=1;
       remoteIndex=(remoteIndex+1)%4; ++appRangeStatus.eventRx;
-      Send(ACK,id,epoch,PEAK_EVENT,0,0,0,0); return;
+      Send(APP_RANGE_MSG_ACK,id,epoch,APP_RANGE_MSG_PEAK_EVENT,0,0,0,0); return;
     }
 #else
-    if (type==EVENT && appRangeStatus.locked && epoch==peerEpoch &&
+    if (type==APP_RANGE_MSG_EVENT && appRangeStatus.locked && epoch==peerEpoch &&
         y>=APP_RANGE_MIN_QUALITY && y<=1000)
     {
       uint64_t masterNow=RangeClock_Now();
       if (x>masterNow || masterNow-x>1500000000ULL) goto reject;
       /* Keep recently consumed entries to suppress event retransmission. */
       for (i=0;i<4;++i) if (remoteEvents[i].id==id && remoteEvents[i].time==x)
-      { Send(ACK,id,epoch,EVENT,0,0,0,0); return; }
+      { Send(APP_RANGE_MSG_ACK,id,epoch,APP_RANGE_MSG_EVENT,0,0,0,0); return; }
       remoteEvents[remoteIndex].time=x; remoteEvents[remoteIndex].id=id;
       remoteEvents[remoteIndex].quality=(uint32_t)y; remoteEvents[remoteIndex].received=now;
       remoteEvents[remoteIndex].used=1; remoteIndex=(remoteIndex+1)%4;
       ++appRangeStatus.eventRx;
-      Send(ACK,id,epoch,EVENT,0,0,0,0); return;
+      Send(APP_RANGE_MSG_ACK,id,epoch,APP_RANGE_MSG_EVENT,0,0,0,0); return;
     }
 #endif
-    if (type==ACK && x==RESULT && id==pendingResultId && epoch==peerEpoch)
+    if (type==APP_RANGE_MSG_ACK && x==APP_RANGE_MSG_RESULT && id==pendingResultId && epoch==peerEpoch)
     { pendingResultId=0; return; }
   }
   else
   {
 #if APP_RANGE_JOINT_PEAKS
-    if(type==PEAK_DIAG && appRangeStatus.locked && epoch==syncEpoch) {
+    if(type==APP_RANGE_MSG_PEAK_DIAG && appRangeStatus.locked && epoch==syncEpoch) {
       RangePairDiag diag;
-      if(!RangePairDiag_Decode(&diag,x,y,z,AppWire_Get64BE(bytes+56),AppWire_Get64BE(bytes+64))) goto reject;
+      if(!RangePairDiag_Decode(&diag,x,y,z,packet.payload[3],packet.payload[4])) goto reject;
       if(!appRangeStatus.pairFailure.serial ||
          (diag.serial-appRangeStatus.pairFailure.serial!=0 &&
           diag.serial-appRangeStatus.pairFailure.serial<0x80000000UL))
         appRangeStatus.pairFailure=diag;
       return;
     }
-    if(type==PEAK_STATE && appRangeStatus.locked && epoch==syncEpoch && x<=1 &&
-       y<=UINT32_MAX && z<=UINT32_MAX && AppWire_Get64BE(bytes+56)<=3 && AppWire_Get64BE(bytes+64)<=APP_RANGE_PEAK_SPREAD_NS) {
+    if(type==APP_RANGE_MSG_PEAK_STATE && appRangeStatus.locked && epoch==syncEpoch && x<=1 &&
+       y<=UINT32_MAX && z<=UINT32_MAX && packet.payload[3]<=3 && packet.payload[4]<=APP_RANGE_PEAK_SPREAD_NS) {
       if(peakStateId && (id==peakStateId || id-peakStateId>=0x80000000UL)) goto reject;
       if(appRangeStatus.resultId && id-appRangeStatus.resultId>=0x80000000UL) goto reject;
       peakStateId=id; appRangeStatus.peakUncertain=(uint8_t)x;
       appRangeStatus.peakAmbiguous=(uint32_t)y; appRangeStatus.peakInconsistent=(uint32_t)z;
-      appRangeStatus.peakCandidates=(uint32_t)AppWire_Get64BE(bytes+56);
-      appRangeStatus.peakPairSpreadNs=(uint32_t)AppWire_Get64BE(bytes+64);
+      appRangeStatus.peakCandidates=(uint32_t)packet.payload[3];
+      appRangeStatus.peakPairSpreadNs=(uint32_t)packet.payload[4];
       return;
     }
 #endif
 #if APP_RANGE_STATISTICS
-    if(type==BATCH_STATE && appRangeStatus.locked && epoch==syncEpoch &&
-       x<=5 && y<=15 && z<=y && AppWire_Get64BE(bytes+56)<=10000 && AppWire_Get64BE(bytes+64)<=UINT32_MAX)
+    if(type==APP_RANGE_MSG_BATCH_STATE && appRangeStatus.locked && epoch==syncEpoch &&
+       x<=5 && y<=15 && z<=y && packet.payload[3]<=10000 && packet.payload[4]<=UINT32_MAX)
     {
       if(batchStateId && (id-batchStateId==0 || id-batchStateId>=0x80000000UL)) goto reject;
       if(appRangeStatus.resultId && id-appRangeStatus.resultId>=0x80000000UL) goto reject;
       batchStateId=id;
-      batchResultFloor=(uint32_t)AppWire_Get64BE(bytes+64);
+      batchResultFloor=(uint32_t)packet.payload[4];
       appRangeStatus.batchStage=(uint32_t)x; appRangeStatus.batchCount=(uint32_t)y;
-      appRangeStatus.batchUsed=(uint32_t)z; appRangeStatus.batchSpanMm=(uint32_t)AppWire_Get64BE(bytes+56);
+      appRangeStatus.batchUsed=(uint32_t)z; appRangeStatus.batchSpanMm=(uint32_t)packet.payload[3];
       if(x==0) { appRangeStatus.valid=0; MicScope_SetRangeState(MIC_SCOPE_RANGE_WAITING); }
       return;
     }
 #endif
-    if (type==SYNC_RESP && pendingRequest && id==requestId && epoch==syncEpoch && rx && x)
+    if (type==APP_RANGE_MSG_SYNC_RESP && pendingRequest && id==requestId && epoch==syncEpoch && rx && x)
     { a2=x; b4=rx; haveResponse=1; return; }
-    if (type==SYNC_FOLLOW && pendingRequest && haveResponse && id==requestId && epoch==syncEpoch)
+    if (type==APP_RANGE_MSG_SYNC_FOLLOW && pendingRequest && haveResponse && id==requestId && epoch==syncEpoch)
     {
       pendingRequest=0;
       if (RangeSync_Add(&syncModel,b1,a2,x,b4))
@@ -535,23 +515,23 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
         if (appRangeStatus.locked && !syncModel.locked) Unlock();
         appRangeStatus.locked=syncModel.locked;
         appRangeStatus.syncErrorNs=syncModel.uncertainty;
-        Send(SYNC_STATE,++sequence,syncEpoch,syncModel.locked,syncModel.uncertainty,0,0,0);
+        Send(APP_RANGE_MSG_SYNC_STATE,++sequence,syncEpoch,syncModel.locked,syncModel.uncertainty,0,0,0);
       }
       return;
     }
-    if (type==ACK && x==(APP_RANGE_JOINT_PEAKS ? PEAK_EVENT:EVENT) && id==pendingEventId && epoch==syncEpoch)
+    if (type==APP_RANGE_MSG_ACK && x==(APP_RANGE_JOINT_PEAKS ? APP_RANGE_MSG_PEAK_EVENT:APP_RANGE_MSG_EVENT) && id==pendingEventId && epoch==syncEpoch)
     { pendingEventId=0; ++appRangeStatus.eventAck; return; }
-    if (type==RESULT && appRangeStatus.locked && epoch==syncEpoch && x<=5000 && y<=2 && z<=1000)
+    if (type==APP_RANGE_MSG_RESULT && appRangeStatus.locked && epoch==syncEpoch && x<=5000 && y<=2 && z<=1000)
     {
 #if APP_RANGE_STATISTICS
       if(batchStateId && appRangeStatus.batchStage!=2 && id-batchStateId>=0x80000000UL && id!=batchResultFloor) goto reject;
 #endif
       if (appRangeStatus.resultId && id!=appRangeStatus.resultId &&
           id-appRangeStatus.resultId>=0x80000000UL) goto reject;
-      if(AppWire_Get64BE(bytes+56)>1) goto reject;
-      if(id!=appRangeStatus.resultId) appRangeStatus.resultIsStat=(uint8_t)AppWire_Get64BE(bytes+56);
+      if(packet.payload[3]>1) goto reject;
+      if(id!=appRangeStatus.resultId) appRangeStatus.resultIsStat=(uint8_t)packet.payload[3];
       DisplayResult(id,(uint32_t)x,(uint32_t)y,(uint32_t)z);
-      Send(ACK,id,epoch,RESULT,0,0,0,0); return;
+      Send(APP_RANGE_MSG_ACK,id,epoch,APP_RANGE_MSG_RESULT,0,0,0,0); return;
     }
   }
 reject:
@@ -841,9 +821,9 @@ static void ClapNetwork(uint32_t now)
   if(!AppClap_Tick(now,uiPage==APP_PAGE_CLAP && AppRange_SettingsReady() && appRangeStatus.locked,
                    temperature,appRangeStatus.syncErrorNs,NextSequence,&message)) return;
   if(message.kind==APP_CLAP_TX_EVENT)
-    Send(CLAP_EVENT,message.id,syncEpoch,message.arrivalNs,message.quality,0,0,0);
+    Send(APP_RANGE_MSG_CLAP_EVENT,message.id,syncEpoch,message.arrivalNs,message.quality,0,0,0);
   else
-    Send(CLAP_RESULT,message.id,peerEpoch,message.distanceCm,message.side,message.quality,message.history,0);
+    Send(APP_RANGE_MSG_CLAP_RESULT,message.id,peerEpoch,message.distanceCm,message.side,message.quality,message.history,0);
 }
 
 static void PositionProcess(void)
@@ -870,9 +850,9 @@ static void PositionNetwork(uint32_t now)
   if(!AppPosition_Tick(now,uiPage==APP_PAGE_POSITION && AppRange_SettingsReady() && appRangeStatus.locked,
                        temperature,NextSequence,&message)) return;
   if(message.kind==APP_POSITION_TX_EVENT)
-    Send(POSITION_EVENT,message.id,syncEpoch,message.arrivalNs[0],message.arrivalNs[1],message.quality,0,0);
+    Send(APP_RANGE_MSG_POSITION_EVENT,message.id,syncEpoch,message.arrivalNs[0],message.arrivalNs[1],message.quality,0,0);
   else
-    Send(POSITION_RESULT,message.id,peerEpoch,message.angleDeg,message.quality,message.valid,
+    Send(APP_RANGE_MSG_POSITION_RESULT,message.id,peerEpoch,message.angleDeg,message.quality,message.valid,
          message.residualNs,message.calibration);
 }
 
@@ -881,7 +861,7 @@ int AppRange_DisplayReady(void)
   uint64_t count;
   uint32_t mask;
   /* Bounded POSITION slices let the 2 Hz UI run even during backlog or an
-   * outstanding settings ACK. Otherwise the user sees a stale waiting frame. */
+   * outstanding settings APP_RANGE_MSG_ACK. Otherwise the user sees a stale waiting frame. */
   if(uiPage==APP_PAGE_POSITION) return 1;
   if(!clockReady || !pcb || AppCapture_Busy() || !RangingEnabled()) return 1;
   mask=__get_PRIMASK(); __disable_irq();
@@ -1064,7 +1044,7 @@ void AppRange_Process(void)
   if(APP_BOARD_ROLE==APP_BOARD_A && uiPage==APP_PAGE_WAVE && appRangeStatus.locked &&
      AppRange_SettingsReady() && now-waveSendMs>=250U) {
     waveSendMs=now;
-    Send(WAVE_CLOCK,++sequence,peerEpoch,AppWave_GetClock()->periodPs,
+    Send(APP_RANGE_MSG_WAVE_CLOCK,++sequence,peerEpoch,AppWave_GetClock()->periodPs,
       AppWave_GetClock()->originNs,AppWave_GetClock()->calibrationMs,0,0);
   }
   if(APP_BOARD_ROLE==APP_BOARD_B)
@@ -1072,12 +1052,12 @@ void AppRange_Process(void)
     if(lastSyncNs && RangeClock_Now()-lastSyncNs>1500000000ULL)
     {
       Unlock(); lastSyncNs=0; appRangeStatus.error=-3;
-      Send(SYNC_STATE,++sequence,syncEpoch,0,0,0,0,0);
+      Send(APP_RANGE_MSG_SYNC_STATE,++sequence,syncEpoch,0,0,0,0,0);
     }
     if(now-lastSyncMs>=100)
     {
       lastSyncMs=now; requestId=++sequence; haveResponse=0;
-      b1=Send(SYNC_REQ,requestId,syncEpoch,0,0,0,0,0);
+      b1=Send(APP_RANGE_MSG_SYNC_REQ,requestId,syncEpoch,0,0,0,0,0);
       pendingRequest=b1!=0;
     }
     if(pendingEventId && now-eventStart>1000) pendingEventId=0;
@@ -1086,13 +1066,13 @@ void AppRange_Process(void)
       eventRetry=now;
       ++appRangeStatus.eventTxAttempts;
 #if APP_RANGE_JOINT_PEAKS
-      Send(PEAK_EVENT,pendingEventId,syncEpoch,pendingEventTime,
+      Send(APP_RANGE_MSG_PEAK_EVENT,pendingEventId,syncEpoch,pendingEventTime,
            ((uint64_t)APP_RANGE_AUDIO_PROFILE<<16)|(pendingPeaks.overflow<<8)|pendingPeaks.count,
            pendingPeaks.count>0 ? RangePeak_Pack(&pendingPeaks.peak[0]):0,
            pendingPeaks.count>1 ? RangePeak_Pack(&pendingPeaks.peak[1]):0,
            pendingPeaks.count>2 ? RangePeak_Pack(&pendingPeaks.peak[2]):0);
 #else
-      Send(EVENT,pendingEventId,syncEpoch,pendingEventTime,pendingEventQuality,0,0,0);
+      Send(APP_RANGE_MSG_EVENT,pendingEventId,syncEpoch,pendingEventTime,pendingEventQuality,0,0,0);
 #endif
     }
   }
@@ -1117,12 +1097,12 @@ void AppRange_Process(void)
 #if APP_RANGE_JOINT_PEAKS
     if(RangingEnabled() && appRangeStatus.locked && now-peakStateMs>=500) {
       peakStateMs=now;
-      Send(PEAK_STATE,++sequence,peerEpoch,appRangeStatus.peakUncertain,
+      Send(APP_RANGE_MSG_PEAK_STATE,++sequence,peerEpoch,appRangeStatus.peakUncertain,
            appRangeStatus.peakAmbiguous,appRangeStatus.peakInconsistent,
            appRangeStatus.peakCandidates,appRangeStatus.peakPairSpreadNs);
       if(appRangeStatus.pairFailure.serial) {
         const RangePairDiag *d=&appRangeStatus.pairFailure;
-        Send(PEAK_DIAG,++sequence,peerEpoch,RangePairDiag_Meta(d),
+        Send(APP_RANGE_MSG_PEAK_DIAG,++sequence,peerEpoch,RangePairDiag_Meta(d),
              ((uint64_t)(uint32_t)d->bestNs<<32)|(uint32_t)d->runnerNs,
              ((uint64_t)d->bestScore<<32)|d->runnerScore,
              ((uint64_t)d->bestSpanNs<<32)|d->runnerSpanNs,d->serial);
@@ -1135,12 +1115,12 @@ void AppRange_Process(void)
     if(pendingResultId && now-resultRetry>=200)
     {
       resultRetry=now;
-      Send(RESULT,pendingResultId,peerEpoch,txResultMm,txResultSide,txResultQuality,txResultKind,0);
+      Send(APP_RANGE_MSG_RESULT,pendingResultId,peerEpoch,txResultMm,txResultSide,txResultQuality,txResultKind,0);
     }
 #if APP_RANGE_STATISTICS
     if(RangingEnabled() && appRangeStatus.locked && now-batchStateMs>=500) {
       batchStateMs=now;
-      Send(BATCH_STATE,++sequence,peerEpoch,batch.stage,batch.count,batch.used,batch.span,appRangeStatus.resultId);
+      Send(APP_RANGE_MSG_BATCH_STATE,++sequence,peerEpoch,batch.stage,batch.count,batch.used,batch.span,appRangeStatus.resultId);
     }
 #endif
   }

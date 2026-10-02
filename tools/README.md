@@ -42,7 +42,7 @@ python tools/audio/generate.py all --regression
 | 脚本 | 大致作用 |
 | --- | --- |
 | [tests/run_host_tests.ps1](tests/run_host_tests.ps1) | 检查音频工具并生成回归输入，构建48 kHz检测器与A/B状态机，运行时基、联合峰、WIDE及处理量回归 |
-| [tests/run_scope_tests.ps1](tests/run_scope_tests.ps1) | 构建并运行音频板级适配、内存布局编译拒绝、独立波形/击掌/定位模块、字节编码、网络、界面、触摸、击掌、定位、波形、公共时基及DSP诊断测试，生成模拟页面图像 |
+| [tests/run_scope_tests.ps1](tests/run_scope_tests.ps1) | 构建并运行音频板级适配、内存布局编译拒绝、独立波形/击掌/定位模块、测量协议编解码与收发故障、字节编码、网络、界面、触摸、击掌、定位、波形、公共时基及DSP诊断测试，生成模拟页面图像 |
 | [tests/run_capture_tests.ps1](tests/run_capture_tests.ps1) | 检查SD驱动与A/B保存事务，并调用解码脚本验证模拟保存数据 |
 | [tests/test_audio_tools.py](tests/test_audio_tools.py) | 检查音频格式、时序、模板一致性、自定义参数、异常输入和导入副作用 |
 | [tests/test_48k.py](tests/test_48k.py) | 检查48 kHz检测器的窗口对齐、分数延迟、完整播放及噪声/单音拒绝 |
@@ -55,6 +55,8 @@ python tools/audio/generate.py all --regression
 | [tests/test_wave_module.c](tests/test_wave_module.c) | 独立链接波形模块，检查插值、历史数据覆盖/epoch变化、时钟包验证与序号回绕 |
 | [tests/test_position_module.c](tests/test_position_module.c) | 独立链接A/B定位模块，检查分片搜索/时刻换算、缓冲竞争、载荷和重传边界、校准及恢复 |
 | [tests/test_clap_module.c](tests/test_clap_module.c) | 独立链接A/B击掌模块，检查滚动历史、载荷校验、重复/旧包、序号回绕及重传/过期时间边界 |
+| [tests/test_range_protocol.c](tests/test_range_protocol.c) | 独立RAN2固定字节向量、非对齐缓冲、全位宽载荷及包头/会话拒绝 |
+| [tests/test_range_transport.c](tests/test_range_transport.c) | A/B测量协调层ARP/TX时间戳准入、收发故障、来源/会话/长度检查及pbuf生命周期 |
 | [tests/test_wire.c](tests/test_wire.c) | 大小端编码的独立已知字节向量与非对齐访问回归 |
 | [tests/audio_paths.py](tests/audio_paths.py) | 统一提供音频回归输入路径，供测试脚本导入 |
 
@@ -63,6 +65,8 @@ python tools/audio/generate.py all --regression
 ./tools/tests/run_scope_tests.ps1
 ./tools/tests/run_capture_tests.ps1
 ```
+
+`run_host_tests.ps1`与`run_scope_tests.ps1`共用临时目录`%TEMP%/ranging-host-tests`，应依次执行，避免中间文件互相覆盖。
 
 DSP音频分析测试依赖NumPy；图像转换脚本依赖Pillow。可用`python -m pip install numpy pillow`准备这两项依赖，生成音频和解码RNG仍只需标准库。
 

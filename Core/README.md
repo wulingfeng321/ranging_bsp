@@ -2,7 +2,7 @@
 
 更新日期：2026-10-02。
 
-`9ee54c2`保存音频/UI解耦与功能裁剪，`e6607ee`保存内存布局与波形拆分，`51ba242`保存通过用户反馈及09检查的击掌拆分。当前在`51ba242`上独立定位模块，主机回归、A/B全量构建及双板下载校验通过，已释放运行，用户反馈其他功能正常，10采集/保存检查通过。保留`Core/Inc`与`Core/Src`目录，通过接口区分生成代码、板级适配和应用职责。
+`9ee54c2`、`e6607ee`、`51ba242`分别保存音频/UI与功能裁剪、内存/波形、击掌拆分；`3bb7718`保存经过用户功能反馈及10核验的定位拆分。本检查点独立测量协议编解码，三类回归、A/B全量构建和双板下载校验通过，12/13已通过标准测距采集、配对及完整声音对应的保存核验；11提前触发边界仍未修复，其他功能反馈待补充。保留Core/Inc与Core/Src目录，通过接口划分职责。
 
 ## 1. 模块职责
 
@@ -20,6 +20,7 @@
 | `range_dsp`、`range_peak_pair`、`range_batch` | 标准音频检测、候选配对及统计；只保留48 kHz模板和窗口 |
 | `clap_dsp`、`position_dsp` | 击掌瞬态检测、定位短扫频与方向计算；保留原算法 |
 | `app_net`、`range_clock`、`range_sync` | 连接会话、硬件时间戳时基与时钟模型 |
+| `app_range_protocol.c/.h` | RAN2测量包常量、大端编解码及包头/角色/会话验证；不负责UDP或业务状态 |
 | `app_wire.h` | 32/64位大小端字节读写；网络/测量采用BE，保存/锚点采用LE；不使用对齐或本机结构体布局假设 |
 | `app_capture`、`capture_sd` | 仅STANDARD的录音与双板保存事务、SD DMA驱动；不实现击掌导出 |
 
@@ -49,9 +50,9 @@
 
 固件和工具仅支持48 kHz；其他采样率在配置或参数校验时拒绝。LEGACY/JOINT2为当前默认，WIDE 48 kHz仍用于回归；48 kHz模板、检测阈值和采样时序保持原值。
 
-`main.c`对新模块的包含、初始化及主循环调用均在USER CODE区。IAR源文件列表包含`board_audio.c`、`app_wave.c`、`app_clap.c`与`app_position.c`；CubeMX再生成后检查这些自定义源文件仍纳入工程。`app_wave.c`、`app_clap.c`、`app_position.c`保持与原`app_range.c`相同的高优化选项，文件级设置不另建角色宏列表。系统/公共外设时钟、GPIO/TIM2及用户区网络初始化归属不变，`ethernetif.c`仍按既有约定恢复。
+`main.c`对新模块的包含、初始化及主循环调用均在USER CODE区。IAR源文件列表包含`board_audio.c`、`app_wave.c`、`app_clap.c`、`app_position.c`与`app_range_protocol.c`；CubeMX再生成后检查这些自定义源文件仍纳入工程。`app_wave.c`、`app_clap.c`、`app_position.c`、`app_range_protocol.c`保持与原`app_range.c`相同的高优化选项，文件级设置不另建角色宏列表。系统/公共外设时钟、GPIO/TIM2及用户区网络初始化归属不变，`ethernetif.c`仍按既有约定恢复。
 
-三类回归入口见[工具目录](../tools/README.md)，本轮构建与未验证项见[实现记录](../commit_logs/2026-10-02-phase4-modules.md)。
+三类回归入口见[工具目录](../tools/README.md)，最新构建与验证边界见[协议整理记录](../commit_logs/2026-10-02-range-protocol.md)；首批裁剪见[实现记录](../commit_logs/2026-10-02-phase4-modules.md)。
 
 ## 4. 波形拆分后的接口
 
@@ -78,3 +79,18 @@
 全量Reset用于页面/设置/失锁等既有清理；RestartTimebase用于真实音频时基变化，清除原偏置、重收集样本，但保留正在校准的意图。仅处理积压则重启搜索、保留校准进度/偏置，不重新生成模板。BeginCalibration由可靠UI清理完成后调用。页面、会话、revision与epoch准入仍在app_range，载荷检查/去重在模块，消息编码/发送由协调层负责。
 
 appPositionStatus继续供界面使用，其中DSP/LCD耗时高水位仍由协调层和界面更新；不把LCD依赖引入定位模块。实现、独立模块测试和原峰值边界回归见[定位拆分日志](../commit_logs/2026-10-02-position-module.md)。
+
+## 7. 测量协议编解码边界
+
+AppRangeProtocol只处理固定RAN2线格式，AppRangePacket是调用内数据，不作网络结构体发送。所有字段采用显式大端编码，未知类型留给协调层分派拒绝。调用者提供有效、互不重叠的缓冲；解码先验证长度、包头及传入的对端角色/会话，通过后才写输出。
+
+| 字节偏移 | 字段 |
+| --- | --- |
+| 0～3 | RAN2魔数 |
+| 4～7 | 版本12、消息类型、发送角色、长度76 |
+| 8 / 16 | 发送/接收会话，各64位 |
+| 24 / 28 | 序号、epoch，各32位 |
+| 32 / 40 / 48 / 56 / 64 | 五个64位载荷槽，语义由消息类型定义 |
+| 72 | UI revision，32位 |
+
+来源IP/端口、pbuf生命周期、ARP解析和硬件收发时间戳由app_range保留；页面/epoch/revision准入和去重仍由原消息处理层负责。CAP1保存协议及网络身份协议不合并入RAN2。详见[协议整理记录](../commit_logs/2026-10-02-range-protocol.md)。

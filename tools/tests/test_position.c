@@ -40,13 +40,13 @@ static void RunAngle(int deg)
       assert(err<12000);
       last=positionEventId;
       if(APP_BOARD_ROLE==APP_BOARD_A) {
-        Inject(POSITION_EVENT,100+matched,7,10000000000ULL+(uint64_t)((arrival[2]+(matched?.5:0))*1e9),
+        Inject(APP_RANGE_MSG_POSITION_EVENT,100+matched,7,10000000000ULL+(uint64_t)((arrival[2]+(matched?.5:0))*1e9),
           10000000000ULL+(uint64_t)((arrival[3]+(matched?.5:0))*1e9),950);
         PositionNetwork(HAL_GetTick());
         assert(appPositionStatus.valid);
         assert(AngularError(appPositionStatus.angleDeg,deg)<12);
       } else {
-        PositionNetwork(HAL_GetTick()); assert(sent[5]==POSITION_EVENT);
+        PositionNetwork(HAL_GetTick()); assert(sent[5]==APP_RANGE_MSG_POSITION_EVENT);
       }
       ++matched;
     }
@@ -107,11 +107,11 @@ int main(void)
   last=appPositionStatus.updatedMs;
   if(APP_BOARD_ROLE==APP_BOARD_B) {
     testPayloadU=1000;
-    Inject(POSITION_RESULT,1234,7,45,900,1);assert(appPositionStatus.valid && appPositionStatus.angleDeg==45);
+    Inject(APP_RANGE_MSG_POSITION_RESULT,1234,7,45,900,1);assert(appPositionStatus.valid && appPositionStatus.angleDeg==45);
     last=appPositionStatus.updatedMs;clockNs+=100000000ULL;
-    Inject(POSITION_RESULT,1234,7,45,900,1);assert(appPositionStatus.updatedMs==last);
-    Inject(POSITION_RESULT,1235,8,90,900,1);assert(appPositionStatus.angleDeg==45);
-    testRevision=uiRevision+1;Inject(POSITION_RESULT,1235,7,90,900,1);assert(appPositionStatus.angleDeg==45);testRevision=0;
+    Inject(APP_RANGE_MSG_POSITION_RESULT,1234,7,45,900,1);assert(appPositionStatus.updatedMs==last);
+    Inject(APP_RANGE_MSG_POSITION_RESULT,1235,8,90,900,1);assert(appPositionStatus.angleDeg==45);
+    testRevision=uiRevision+1;Inject(APP_RANGE_MSG_POSITION_RESULT,1235,7,90,900,1);assert(appPositionStatus.angleDeg==45);testRevision=0;
   }
   clockNs+=2000000000ULL;PositionNetwork(HAL_GetTick());assert(!appPositionStatus.valid);
   ApplyUi(APP_PAGE_STANDARD,250);assert(!positionEventId && !appPositionStatus.valid);
@@ -163,7 +163,7 @@ int main(void)
   ++audioEpoch;++audioBlocks;audioAnchor=clockNs;ObservePageAudioTime();
   assert(appPositionStatus.calibration==1 && appPositionStatus.calibrationCount==0);
   assert(!audioTime.ready);
-  /* Even with no settings ACK and a large backlog, the waiting UI is admitted. */
+  /* Even with no settings APP_RANGE_MSG_ACK and a large backlog, the waiting UI is admitted. */
   uiAckRevision=0;uiKnown=0;positionCursor=0;audioTime.ready=1;
   assert(AppRange_DisplayReady());
 

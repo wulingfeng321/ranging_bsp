@@ -51,11 +51,11 @@ int main(void)
     assert(AppWave_GetClock()->periodPs && fabs(1e12/AppWave_GetClock()->periodPs-500.037)<0.002);
   } else {
     testPayloadU=testPayloadV=0;
-    Inject(WAVE_CLOCK,900,syncEpoch,1999852011ULL,11000000000ULL,5000);
+    Inject(APP_RANGE_MSG_WAVE_CLOCK,900,syncEpoch,1999852011ULL,11000000000ULL,5000);
     assert(AppWave_GetClock()->periodPs==1999852011ULL);
-    Inject(WAVE_CLOCK,899,syncEpoch,2000000000ULL,11000000000ULL,5000);
+    Inject(APP_RANGE_MSG_WAVE_CLOCK,899,syncEpoch,2000000000ULL,11000000000ULL,5000);
     assert(AppWave_GetClock()->periodPs==1999852011ULL); /* Out-of-order state never reverses phase. */
-    Inject(WAVE_CLOCK,901,syncEpoch+1,2000000000ULL,11000000000ULL,5000);
+    Inject(APP_RANGE_MSG_WAVE_CLOCK,901,syncEpoch+1,2000000000ULL,11000000000ULL,5000);
     assert(AppWave_GetClock()->periodPs==1999852011ULL);
   }
   period=AppWave_GetClock()->periodPs; origin=AppWave_GetClock()->originNs; before=CheckTrace();

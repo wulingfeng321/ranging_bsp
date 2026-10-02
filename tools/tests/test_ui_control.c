@@ -31,7 +31,7 @@ int main(void)
   assert(AppRange_AutoTemperature()==-2);
   sensorValue=253;assert(AppRange_AutoTemperature()==1);
   if(APP_BOARD_ROLE==APP_BOARD_A) {
-    assert(temperature==255);Inject(UI_ACK,uiRevision,0,0,0,0);
+    assert(temperature==255);Inject(APP_RANGE_MSG_UI_ACK,uiRevision,0,0,0,0);
   } else {
     assert(uiPendingId && uiRequestKind==1 && uiRequestValue==355);
     uiPendingId=0;
@@ -43,28 +43,28 @@ int main(void)
   if(APP_BOARD_ROLE==APP_BOARD_A) {
     assert(uiPage==APP_PAGE_WAVE && !appRangeStatus.valid && !appRangeArrival.valid);
     rev=uiRevision; testRevision=rev-1;
-    Inject(UI_ACK,rev-1,0,0,0,0); assert(!AppRange_SettingsReady());
-    testRevision=0; Inject(UI_ACK,rev,0,0,0,0); assert(AppRange_SettingsReady());
-    Inject(UI_REQUEST,13,0,1,355,0); assert(temperature==255);
-    rev=uiRevision; Inject(UI_REQUEST,13,0,1,355,0); assert(uiRevision==rev && temperature==255);
-    Inject(UI_REQUEST,12,0,0,APP_PAGE_CLAP,0); assert(uiPage==APP_PAGE_WAVE);
-    Inject(UI_REQUEST,14,0,1,601,0); assert(temperature==255);
-    Inject(UI_ACK,rev,0,0,0,0);
+    Inject(APP_RANGE_MSG_UI_ACK,rev-1,0,0,0,0); assert(!AppRange_SettingsReady());
+    testRevision=0; Inject(APP_RANGE_MSG_UI_ACK,rev,0,0,0,0); assert(AppRange_SettingsReady());
+    Inject(APP_RANGE_MSG_UI_REQUEST,13,0,1,355,0); assert(temperature==255);
+    rev=uiRevision; Inject(APP_RANGE_MSG_UI_REQUEST,13,0,1,355,0); assert(uiRevision==rev && temperature==255);
+    Inject(APP_RANGE_MSG_UI_REQUEST,12,0,0,APP_PAGE_CLAP,0); assert(uiPage==APP_PAGE_WAVE);
+    Inject(APP_RANGE_MSG_UI_REQUEST,14,0,1,601,0); assert(temperature==255);
+    Inject(APP_RANGE_MSG_UI_ACK,rev,0,0,0,0);
   } else {
     id=uiPendingId; UiProcess(HAL_GetTick());
-    assert(sent[5]==UI_REQUEST && AppWire_Get32BE(sent+24)==id);
+    assert(sent[5]==APP_RANGE_MSG_UI_REQUEST && AppWire_Get32BE(sent+24)==id);
     clockNs+=250000000; UiProcess(HAL_GetTick());
-    assert(sent[5]==UI_REQUEST && AppWire_Get32BE(sent+24)==id);
+    assert(sent[5]==APP_RANGE_MSG_UI_REQUEST && AppWire_Get32BE(sent+24)==id);
     testRevision=2; testPayloadU=7; testPayloadV=id;
-    Inject(UI_STATE,2,0,350,APP_PAGE_WAVE,origin);
+    Inject(APP_RANGE_MSG_UI_STATE,2,0,350,APP_PAGE_WAVE,origin);
     assert(uiPage==APP_PAGE_WAVE && AppRange_SettingsReady() && !appRangeArrival.valid);
-    assert(sent[5]==UI_ACK);
-    testRevision=1; Inject(UI_STATE,1,0,350,APP_PAGE_CLAP,origin); assert(uiPage==APP_PAGE_WAVE);
+    assert(sent[5]==APP_RANGE_MSG_UI_ACK);
+    testRevision=1; Inject(APP_RANGE_MSG_UI_STATE,1,0,350,APP_PAGE_CLAP,origin); assert(uiPage==APP_PAGE_WAVE);
     testRevision=0;
     assert(AppRange_AdjustTemperature(5)); id=uiPendingId;
     assert(uiRequestValue==355);
     testRevision=3; testPayloadV=id;
-    Inject(UI_STATE,3,0,355,APP_PAGE_WAVE,origin); assert(temperature==255);
+    Inject(APP_RANGE_MSG_UI_STATE,3,0,355,APP_PAGE_WAVE,origin); assert(temperature==255);
     testPayloadU=testPayloadV=testRevision=0;
   }
   assert(syncOriginNs==origin && appRangeStatus.locked); /* No clock reset on tab/temp changes. */
@@ -82,21 +82,21 @@ int main(void)
   /* Measurement wire revisions reject delayed packets after a config edit. */
   uiPage=APP_PAGE_STANDARD; uiKnown=1; uiAckRevision=uiRevision;
   testRevision=uiRevision+1;
-  Inject(RESULT,700,syncEpoch,1234,1,950); assert(!appRangeStatus.valid);
+  Inject(APP_RANGE_MSG_RESULT,700,syncEpoch,1234,1,950); assert(!appRangeStatus.valid);
   testRevision=0;
   if(APP_BOARD_ROLE==APP_BOARD_B) {
-    Inject(RESULT,701,syncEpoch,1234,1,950); assert(appRangeStatus.valid);
+    Inject(APP_RANGE_MSG_RESULT,701,syncEpoch,1234,1,950); assert(appRangeStatus.valid);
   }
   if(APP_BOARD_ROLE==APP_BOARD_A) {
     uint64_t stamp=clockNs-200000000ULL; unsigned pulse;
     for(pulse=0;pulse<3;++pulse) detectedPeaks.peak[0].offsetNs[pulse]=0;
     temperature=250; ClearMeasurements();
     DetectionReady(stamp,950);
-    Inject(PEAK_EVENT,800,peerEpoch,stamp+5000000ULL,65537,RangePeak_Pack(&detectedPeaks.peak[0]));
+    Inject(APP_RANGE_MSG_PEAK_EVENT,800,peerEpoch,stamp+5000000ULL,65537,RangePeak_Pack(&detectedPeaks.peak[0]));
     PairEvents(); assert(appRangeStatus.distanceMm==1732);
     temperature=255; ClearMeasurements();
     DetectionReady(stamp,950);
-    Inject(PEAK_EVENT,801,peerEpoch,stamp+5000000ULL,65537,RangePeak_Pack(&detectedPeaks.peak[0]));
+    Inject(APP_RANGE_MSG_PEAK_EVENT,801,peerEpoch,stamp+5000000ULL,65537,RangePeak_Pack(&detectedPeaks.peak[0]));
     PairEvents(); assert(appRangeStatus.distanceMm==1734);
   }
   captureBusy=1;
@@ -110,17 +110,17 @@ int main(void)
   rev=uiRevision;events=appRangeStatus.events;
   if(APP_BOARD_ROLE==APP_BOARD_A) {
     AutoFeedback(2);assert(AppRange_AutoTemperatureStatus()==2);
-    Inject(AUTO_STATUS_REQUEST,100,0,3,0,0);assert(autoStatus==3);
-    id=autoSerial;Inject(AUTO_STATUS_REQUEST,100,0,3,0,0);assert(autoSerial==id);
-    AutoFeedback(4);Inject(AUTO_STATUS_REQUEST,99,0,2,0,0);assert(autoStatus==4);
-    Inject(AUTO_STATUS_REQUEST,101,0,0,0,0);assert(!autoStatus);
+    Inject(APP_RANGE_MSG_AUTO_STATUS_REQUEST,100,0,3,0,0);assert(autoStatus==3);
+    id=autoSerial;Inject(APP_RANGE_MSG_AUTO_STATUS_REQUEST,100,0,3,0,0);assert(autoSerial==id);
+    AutoFeedback(4);Inject(APP_RANGE_MSG_AUTO_STATUS_REQUEST,99,0,2,0,0);assert(autoStatus==4);
+    Inject(APP_RANGE_MSG_AUTO_STATUS_REQUEST,101,0,0,0,0);assert(!autoStatus);
   } else {
     AutoFeedback(2);id=autoPendingId;
-    Inject(AUTO_STATUS_STATE,100,0,1,0,0);assert(autoStatus==2 && autoPendingId==id);
-    Inject(AUTO_STATUS_STATE,101,0,2,id,0);assert(autoStatus==2 && !autoPendingId);
-    Inject(AUTO_STATUS_STATE,102,0,3,id,0);assert(autoStatus==3);
-    Inject(AUTO_STATUS_STATE,101,0,2,id,0);assert(autoStatus==3);
-    Inject(AUTO_STATUS_STATE,103,0,0,id,0);assert(!autoStatus);
+    Inject(APP_RANGE_MSG_AUTO_STATUS_STATE,100,0,1,0,0);assert(autoStatus==2 && autoPendingId==id);
+    Inject(APP_RANGE_MSG_AUTO_STATUS_STATE,101,0,2,id,0);assert(autoStatus==2 && !autoPendingId);
+    Inject(APP_RANGE_MSG_AUTO_STATUS_STATE,102,0,3,id,0);assert(autoStatus==3);
+    Inject(APP_RANGE_MSG_AUTO_STATUS_STATE,101,0,2,id,0);assert(autoStatus==3);
+    Inject(APP_RANGE_MSG_AUTO_STATUS_STATE,103,0,0,id,0);assert(!autoStatus);
   }
   assert(uiRevision==rev && appRangeStatus.events==events);
   puts("PASS: linked UI, retransmission, stale revisions, temperature bounds, paused DSP, pulse clocks, unlock reset");

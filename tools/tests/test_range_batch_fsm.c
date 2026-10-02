@@ -14,14 +14,14 @@ int main(void)
       uint64_t stamp;
       if(i==2) {
         clockNs=20750000000ULL; stamp=clockNs-200000000;
-        DetectionReady(stamp,900); Inject(EVENT,500,peerEpoch,stamp+524140,800,0);
+        DetectionReady(stamp,900); Inject(APP_RANGE_MSG_EVENT,500,peerEpoch,stamp+524140,800,0);
         PairEvents();
         if(batch.count!=2 || appRangeStatus.batchCadenceRejected!=1) return 1;
       }
       clockNs=20000000000ULL+(uint64_t)ms*1000000ULL;
       stamp=clockNs-200000000;
       DetectionReady(stamp,900);
-      Inject(EVENT,100+i,peerEpoch,stamp+524140,800,0);
+      Inject(APP_RANGE_MSG_EVENT,100+i,peerEpoch,stamp+524140,800,0);
       PairEvents();
       if(!appRangeStatus.valid || appRangeStatus.resultIsStat || appRangeStatus.distanceMm!=180)
       { puts("FAIL: missing single-shot preview"); return 1; }
@@ -33,10 +33,10 @@ int main(void)
     {
       uint32_t savedId=appRangeStatus.resultId, savedTick=lastResultMs;
       /* The next observation starts a new batch without replacing the green
-       * estimate, its expiry, or the result awaiting ACK/retransmission. */
+       * estimate, its expiry, or the result awaiting APP_RANGE_MSG_ACK/retransmission. */
       clockNs+=500000000ULL;
       DetectionReady(clockNs-200000000ULL,900);
-      Inject(EVENT,600,peerEpoch,clockNs-200000000ULL+291205,800,0);
+      Inject(APP_RANGE_MSG_EVENT,600,peerEpoch,clockNs-200000000ULL+291205,800,0);
       PairEvents();
       if(batch.count!=1 || batch.stage!=1 || displays!=17 ||
          !appRangeStatus.resultIsStat || appRangeStatus.distanceMm!=180 ||
@@ -49,29 +49,29 @@ int main(void)
       clockNs+=4000000000ULL; lastStateMs=HAL_GetTick(); AppRange_Process();
       if(appRangeStatus.valid) return 1;
       DetectionReady(clockNs-200000000ULL,900);
-      Inject(EVENT,601,peerEpoch,clockNs-200000000ULL+291205,800,0);
+      Inject(APP_RANGE_MSG_EVENT,601,peerEpoch,clockNs-200000000ULL+291205,800,0);
       PairEvents();
       if(!appRangeStatus.valid || appRangeStatus.resultIsStat || appRangeStatus.distanceMm!=100) return 1;
     }
   } else {
     syncEpoch=7;
-    Inject(BATCH_STATE,100,7,1,4,0);
+    Inject(APP_RANGE_MSG_BATCH_STATE,100,7,1,4,0);
     if(appRangeStatus.batchCount!=4 || appRangeStatus.valid) return 1;
-    Inject(RESULT,110,7,180,1,800);
-    Inject(BATCH_STATE,105,7,1,5,0); /* Reordered old collecting state. */
+    Inject(APP_RANGE_MSG_RESULT,110,7,180,1,800);
+    Inject(APP_RANGE_MSG_BATCH_STATE,105,7,1,5,0); /* Reordered old collecting state. */
     if(!appRangeStatus.valid || displays!=1) return 1;
-    Inject(BATCH_STATE,120,7,1,1,0);
-    Inject(RESULT,115,7,190,1,800); /* Old batch after a new collection. */
+    Inject(APP_RANGE_MSG_BATCH_STATE,120,7,1,1,0);
+    Inject(APP_RANGE_MSG_RESULT,115,7,190,1,800); /* Old batch after a new collection. */
     if(!appRangeStatus.valid || displays!=1) return 1;
-    Inject(BATCH_STATE,125,7,4,5,0);
+    Inject(APP_RANGE_MSG_BATCH_STATE,125,7,4,5,0);
     if(!appRangeStatus.valid || appRangeStatus.resultIsStat) return 1;
-    testPayloadV=140; Inject(BATCH_STATE,142,7,1,6,0); testPayloadV=0;
-    Inject(RESULT,140,7,175,1,800); /* STATE arrived ahead of its referenced preview. */
+    testPayloadV=140; Inject(APP_RANGE_MSG_BATCH_STATE,142,7,1,6,0); testPayloadV=0;
+    Inject(APP_RANGE_MSG_RESULT,140,7,175,1,800); /* STATE arrived ahead of its referenced preview. */
     if(!appRangeStatus.valid || appRangeStatus.distanceMm!=175) return 1;
-    testPayloadV=150; Inject(BATCH_STATE,152,7,2,15,12); testPayloadV=0;
-    testPayloadU=1; Inject(RESULT,150,7,180,1,800); testPayloadU=0;
+    testPayloadV=150; Inject(APP_RANGE_MSG_BATCH_STATE,152,7,2,15,12); testPayloadV=0;
+    testPayloadU=1; Inject(APP_RANGE_MSG_RESULT,150,7,180,1,800); testPayloadU=0;
     if(!appRangeStatus.resultIsStat || appRangeStatus.distanceMm!=180) return 1;
-    Inject(RESULT,150,7,180,1,800); /* Duplicate cannot relabel an existing result. */
+    Inject(APP_RANGE_MSG_RESULT,150,7,180,1,800); /* Duplicate cannot relabel an existing result. */
     if(!appRangeStatus.resultIsStat) return 1;
   }
   puts("PASS: batch state machine"); return 0;

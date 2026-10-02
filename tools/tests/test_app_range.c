@@ -1,6 +1,6 @@
 /* Actual ranging state machine, with deterministic transport and hardware clock. */
 #ifndef APP_RANGE_JOINT_PEAKS
-#define APP_RANGE_JOINT_PEAKS 0 /* This suite exercises the original EVENT protocol. */
+#define APP_RANGE_JOINT_PEAKS 0 /* This suite exercises the original APP_RANGE_MSG_EVENT protocol. */
 #endif
 #ifndef APP_RANGE_STATISTICS
 #define APP_RANGE_STATISTICS 0 /* Legacy single-result regression suite. */
@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "app_wire.h"
 #include "../../Core/Src/app_range.c"
 void AppCapture_Audio(const volatile int16_t *p,uint32_t n,uint64_t c,uint64_t t,uint32_t e)
 { (void)p;(void)n;(void)c;(void)t;(void)e; }
@@ -28,7 +29,9 @@ uint32_t rangeTxStampSerial;
 static uint64_t clockNs=10000000000ULL;
 static struct udp_pcb fakePcb;
 static int balance, displays;
-static uint8_t sent[WIRE_SIZE];
+static int testArpMiss,testAllocFail,testTakeFail,testSendFail,testNoTxStamp,testCopyShort;
+static unsigned testArpRequests,testUdpSends;
+static uint8_t sent[APP_RANGE_WIRE_SIZE];
 static uint64_t testPayloadU,testPayloadV;
 static uint32_t tickAdvanceMs, testRevision;
 uint32_t HAL_GetTick(void)
@@ -46,14 +49,14 @@ uint64_t AppNet_PeerSession(void) { return 222; }
 void MicScope_SetRangeState(MicScope_RangeState s) { (void)s; }
 void MicScope_SetDistanceMm(uint32_t mm) { assert(mm<=5000); ++displays; }
 int etharp_find_addr(struct netif *n,const ip4_addr_t *i,struct eth_addr **m,const ip4_addr_t **p)
-{ (void)n;(void)i;(void)m;(void)p;return 0; }
-int etharp_request(struct netif *n,const ip4_addr_t *p) { (void)n;(void)p;return 0; }
+{ (void)n;(void)i;(void)m;(void)p;return testArpMiss ? -1:0; }
+int etharp_request(struct netif *n,const ip4_addr_t *p) { (void)n;(void)p;++testArpRequests;return 0; }
 struct pbuf *pbuf_alloc(int l,uint16_t n,int t)
-{ struct pbuf *p=malloc(sizeof(*p));(void)l;(void)t;assert(p);p->tot_len=n;++balance;return p; }
+{ struct pbuf *p;if(testAllocFail) return NULL;p=malloc(sizeof(*p));(void)l;(void)t;assert(p);p->tot_len=n;++balance;return p; }
 void pbuf_free(struct pbuf *p) { free(p);--balance; }
-err_t pbuf_take(struct pbuf *p,const void *b,uint16_t n) { memcpy(p->bytes,b,n);return 0; }
+err_t pbuf_take(struct pbuf *p,const void *b,uint16_t n) { if(testTakeFail) return -1;memcpy(p->bytes,b,n);return 0; }
 uint16_t pbuf_copy_partial(struct pbuf *p,void *b,uint16_t n,uint16_t o)
-{ memcpy(b,p->bytes+o,n);return n; }
+{ memcpy(b,p->bytes+o,n);return testCopyShort ? n-1:n; }
 struct udp_pcb *udp_new(void) { return &fakePcb; }
 err_t udp_bind(struct udp_pcb *p,const ip_addr_t *a,uint16_t port)
 { (void)p;(void)a;assert(port==5001);return 0; }
@@ -62,14 +65,16 @@ void udp_recv(struct udp_pcb *p,void (*f)(void *,struct udp_pcb *,struct pbuf *,
 { (void)p;(void)f;(void)a; }
 err_t udp_sendto(struct udp_pcb *p,struct pbuf *b,const ip_addr_t *a,uint16_t port)
 {
-  (void)p;(void)a;assert(port==5001 && b->tot_len==WIRE_SIZE);
-  memcpy(sent,b->bytes,WIRE_SIZE);rangeTxTimestamp=clockNs;++rangeTxStampSerial;return 0;
+  (void)p;(void)a;assert(port==5001 && b->tot_len==APP_RANGE_WIRE_SIZE);
+  memcpy(sent,b->bytes,APP_RANGE_WIRE_SIZE);++testUdpSends;
+  if(!testNoTxStamp) { rangeTxTimestamp=clockNs;++rangeTxStampSerial; }
+  return testSendFail ? -1:0;
 }
 static void Inject(uint8_t type,uint32_t id,uint32_t epoch,uint64_t x,uint64_t y,uint64_t z)
 {
-  struct pbuf *p=pbuf_alloc(0,WIRE_SIZE,0);
-  memset(p->bytes,0,WIRE_SIZE);memcpy(p->bytes,"RAN2",4);
-  p->bytes[4]=RANGE_WIRE_VERSION;p->bytes[5]=type;p->bytes[6]=APP_PEER_ROLE;p->bytes[7]=WIRE_SIZE;
+  struct pbuf *p=pbuf_alloc(0,APP_RANGE_WIRE_SIZE,0);
+  memset(p->bytes,0,APP_RANGE_WIRE_SIZE);memcpy(p->bytes,"RAN2",4);
+  p->bytes[4]=APP_RANGE_WIRE_VERSION;p->bytes[5]=type;p->bytes[6]=APP_PEER_ROLE;p->bytes[7]=APP_RANGE_WIRE_SIZE;
   AppWire_Put64BE(p->bytes+8,222);AppWire_Put64BE(p->bytes+16,111);AppWire_Put32BE(p->bytes+24,id);AppWire_Put32BE(p->bytes+28,epoch);
   AppWire_Put64BE(p->bytes+32,x);AppWire_Put64BE(p->bytes+40,y);AppWire_Put64BE(p->bytes+48,z);
   AppWire_Put64BE(p->bytes+56,testPayloadU);AppWire_Put64BE(p->bytes+64,testPayloadV);AppWire_Put32BE(p->bytes+72,testRevision ? testRevision : uiRevision);
@@ -81,23 +86,23 @@ int main(void)
   AppRange_Init();appNetStatus.online=1;AppRange_Process(); uiKnown=1; uiAckRevision=uiRevision;
   if(APP_BOARD_ROLE==APP_BOARD_A)
   {
-    Inject(SYNC_STATE,1,7,1,1000,0);assert(appRangeStatus.locked);
-    Inject(SYNC_STATE,1,6,0,0,0);assert(appRangeStatus.locked && peerEpoch==7);
+    Inject(APP_RANGE_MSG_SYNC_STATE,1,7,1,1000,0);assert(appRangeStatus.locked);
+    Inject(APP_RANGE_MSG_SYNC_STATE,1,6,0,0,0);assert(appRangeStatus.locked && peerEpoch==7);
     DetectionReady(clockNs-200000000ULL,950);
-    Inject(EVENT,19,7,clockNs-197087950ULL,APP_RANGE_MIN_QUALITY-1,0);
+    Inject(APP_RANGE_MSG_EVENT,19,7,clockNs-197087950ULL,APP_RANGE_MIN_QUALITY-1,0);
     PairEvents();assert(displays==0);
-    Inject(EVENT,20,7,clockNs-197087950ULL,APP_RANGE_MIN_QUALITY,0);
+    Inject(APP_RANGE_MSG_EVENT,20,7,clockNs-197087950ULL,APP_RANGE_MIN_QUALITY,0);
     PairEvents();assert(displays==1 && appRangeStatus.distanceMm==1000 && appRangeStatus.direction==1);
     assert(appRangeStatus.eventRx==1 && appRangeStatus.pairDeltaValid &&
            appRangeStatus.pairDeltaUs==2912 && appRangeStatus.results==1);
-    Inject(EVENT,20,7,clockNs-197087950ULL,900,0);
+    Inject(APP_RANGE_MSG_EVENT,20,7,clockNs-197087950ULL,900,0);
     PairEvents();assert(displays==1);
     assert(appRangeStatus.eventRx==1); /* Retries are not new received events. */
-    Inject(ACK,pendingResultId,7,RESULT,0,0);assert(pendingResultId==0);
+    Inject(APP_RANGE_MSG_ACK,pendingResultId,7,APP_RANGE_MSG_RESULT,0,0);assert(pendingResultId==0);
     /* Wrong generation and non-matching event must not produce a range. */
     DetectionReady(clockNs-100000000ULL,950);
-    Inject(EVENT,21,6,clockNs-99000000ULL,900,0);PairEvents();assert(displays==1);
-    Inject(EVENT,22,7,clockNs-50000000ULL,900,0);PairEvents();assert(displays==1);
+    Inject(APP_RANGE_MSG_EVENT,21,6,clockNs-99000000ULL,900,0);PairEvents();assert(displays==1);
+    Inject(APP_RANGE_MSG_EVENT,22,7,clockNs-50000000ULL,900,0);PairEvents();assert(displays==1);
     assert(appRangeStatus.pairDeltaValid && appRangeStatus.pairDeltaUs==50000);
     clockNs+=1600000000ULL;AppRange_Process();assert(!appRangeStatus.locked && !appRangeStatus.valid);
   }
@@ -108,19 +113,19 @@ int main(void)
     {
       uint64_t t=clockNs;AppRange_Process();assert(pendingRequest);
       clockNs=t+64000;
-      Inject(SYNC_RESP,requestId,syncEpoch,t-700000000ULL+12000,0,0);
-      Inject(SYNC_FOLLOW,requestId,syncEpoch,t-700000000ULL+52000,0,0);
+      Inject(APP_RANGE_MSG_SYNC_RESP,requestId,syncEpoch,t-700000000ULL+12000,0,0);
+      Inject(APP_RANGE_MSG_SYNC_FOLLOW,requestId,syncEpoch,t-700000000ULL+52000,0,0);
       clockNs=t+100000000ULL;
     }
     assert(appRangeStatus.locked);
     DetectionReady(clockNs-200000000ULL,900);assert(pendingEventId);
-    Inject(ACK,pendingEventId,syncEpoch,EVENT,0,0);assert(!pendingEventId);
+    Inject(APP_RANGE_MSG_ACK,pendingEventId,syncEpoch,APP_RANGE_MSG_EVENT,0,0);assert(!pendingEventId);
     assert(appRangeStatus.eventAck==1 && appRangeStatus.eventQuality==900);
-    Inject(RESULT,100,syncEpoch,1000,2,900);
-    Inject(RESULT,100,syncEpoch,1000,2,900);
-    Inject(RESULT,99,syncEpoch,2000,1,900);
+    Inject(APP_RANGE_MSG_RESULT,100,syncEpoch,1000,2,900);
+    Inject(APP_RANGE_MSG_RESULT,100,syncEpoch,1000,2,900);
+    Inject(APP_RANGE_MSG_RESULT,99,syncEpoch,2000,1,900);
     assert(displays==1 && appRangeStatus.distanceMm==1000 && appRangeStatus.direction==-1);
-    Inject(RESULT,101,syncEpoch+1,2000,1,900);assert(displays==1);
+    Inject(APP_RANGE_MSG_RESULT,101,syncEpoch+1,2000,1,900);assert(displays==1);
     clockNs+=1600000000ULL;AppRange_Process();assert(!appRangeStatus.locked && !appRangeStatus.valid);
   }
   appNetStatus.online=0;AppRange_Process();assert(!appRangeStatus.valid);
@@ -182,20 +187,20 @@ int main(void)
     }
     stamp=windowAnchorNs-(2048ULL-17)*62500ULL;
     if(APP_BOARD_ROLE==APP_BOARD_A)
-      Inject(EVENT,1000+i,peerEpoch,stamp+2912050ULL,900,0);
+      Inject(APP_RANGE_MSG_EVENT,1000+i,peerEpoch,stamp+2912050ULL,900,0);
     tickAdvanceMs=1;
     AppRange_Process();
     tickAdvanceMs=0;
     if(APP_BOARD_ROLE==APP_BOARD_B)
     {
-      if(!pendingEventId || appRangeStatus.eventTxAttempts!=txBefore+1 || sent[5]!=EVENT)
-      { puts("FAIL: new detection expired before EVENT transmission"); return 1; }
+      if(!pendingEventId || appRangeStatus.eventTxAttempts!=txBefore+1 || sent[5]!=APP_RANGE_MSG_EVENT)
+      { puts("FAIL: new detection expired before APP_RANGE_MSG_EVENT transmission"); return 1; }
       if(pendingEventTime+2000<stamp || pendingEventTime>stamp+2000)
       { puts("FAIL: window timestamp changed with newer sample period"); return 1; }
     }
     else if(!pendingResultId || appRangeStatus.results!=resultsBefore+1 ||
-            !appRangeStatus.valid || sent[5]!=RESULT || appRangeStatus.distanceMm!=1000)
-    { puts("FAIL: new result expired before RESULT transmission"); return 1; }
+            !appRangeStatus.valid || sent[5]!=APP_RANGE_MSG_RESULT || appRangeStatus.distanceMm!=1000)
+    { puts("FAIL: new result expired before APP_RANGE_MSG_RESULT transmission"); return 1; }
   }
   printf("Role %s range FSM: pairing/sync, replay, generations, timeout, disconnect, advancing tick PASS\n",APP_BOARD_NAME);
   return 0;

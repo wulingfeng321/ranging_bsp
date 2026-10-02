@@ -15,7 +15,7 @@ static void InjectPeaks(uint32_t id,uint64_t stamp,const RangePeaks *peaks)
 {
   testPayloadU=peaks->count>1 ? RangePeak_Pack(&peaks->peak[1]):0;
   testPayloadV=peaks->count>2 ? RangePeak_Pack(&peaks->peak[2]):0;
-  Inject(PEAK_EVENT,id,peerEpoch,stamp,((uint64_t)APP_RANGE_AUDIO_PROFILE<<16)|
+  Inject(APP_RANGE_MSG_PEAK_EVENT,id,peerEpoch,stamp,((uint64_t)APP_RANGE_AUDIO_PROFILE<<16)|
          (peaks->overflow<<8)|peaks->count,RangePeak_Pack(&peaks->peak[0]));
   testPayloadU=0; testPayloadV=0;
 }
@@ -28,7 +28,7 @@ int main(void)
   stamp=clockNs-200000000ULL;
   if(APP_BOARD_ROLE==APP_BOARD_A) {
     DetectionReady(stamp,950);
-    Inject(EVENT,10,7,stamp+378546,950,0); PairEvents();
+    Inject(APP_RANGE_MSG_EVENT,10,7,stamp+378546,950,0); PairEvents();
     assert(!displays); /* Mixed old firmware cannot bypass joint matching. */
     InjectPeaks(11,stamp+378546,&remote); PairEvents();
     /* 378.546 us at the current 25 C setting rounds to 131 mm. */
@@ -46,10 +46,10 @@ int main(void)
     assert(appRangeStatus.pairFailure.bestScore==902500 && appRangeStatus.pairFailure.runnerScore==883500);
     /* Malformed fields, old epoch and wrong profile never create events. */
     i=appRangeStatus.eventRx;
-    Inject(PEAK_EVENT,13,6,stamp,65537,RangePeak_Pack(&remote.peak[0]));
-    Inject(PEAK_EVENT,13,7,stamp,65540,RangePeak_Pack(&remote.peak[0]));
-    Inject(PEAK_EVENT,13,7,stamp,131073,RangePeak_Pack(&remote.peak[0]));
-    Inject(PEAK_EVENT,13,7,stamp,65537,0);
+    Inject(APP_RANGE_MSG_PEAK_EVENT,13,6,stamp,65537,RangePeak_Pack(&remote.peak[0]));
+    Inject(APP_RANGE_MSG_PEAK_EVENT,13,7,stamp,65540,RangePeak_Pack(&remote.peak[0]));
+    Inject(APP_RANGE_MSG_PEAK_EVENT,13,7,stamp,131073,RangePeak_Pack(&remote.peak[0]));
+    Inject(APP_RANGE_MSG_PEAK_EVENT,13,7,stamp,65537,0);
     assert(appRangeStatus.eventRx==i);
     clockNs+=500000000; stamp+=500000000;
     remote=OnePeak(-145594,900);
@@ -63,22 +63,22 @@ int main(void)
     DetectionReady(stamp,950);
     assert(pendingPeaks.count==1 && pendingPeaks.peak[0].offsetNs[2]>=-2 && pendingPeaks.peak[0].offsetNs[2]<=2);
     lastSyncMs=HAL_GetTick(); lastSyncNs=clockNs;
-    AppRange_Process(); assert(sent[5]==PEAK_EVENT && AppWire_Get32BE(sent+24)==pendingEventId);
+    AppRange_Process(); assert(sent[5]==APP_RANGE_MSG_PEAK_EVENT && AppWire_Get32BE(sent+24)==pendingEventId);
     {
-      uint8_t original[WIRE_SIZE]; uint32_t id=pendingEventId;
-      memcpy(original,sent,WIRE_SIZE);
+      uint8_t original[APP_RANGE_WIRE_SIZE]; uint32_t id=pendingEventId;
+      memcpy(original,sent,APP_RANGE_WIRE_SIZE);
       clockNs+=200000000; lastSyncMs=HAL_GetTick(); AppRange_Process();
-      assert(!memcmp(original,sent,WIRE_SIZE));
-      Inject(ACK,id,syncEpoch,EVENT,0,0); assert(pendingEventId==id);
-      Inject(ACK,id,syncEpoch,PEAK_EVENT,0,0); assert(!pendingEventId);
+      assert(!memcmp(original,sent,APP_RANGE_WIRE_SIZE));
+      Inject(APP_RANGE_MSG_ACK,id,syncEpoch,APP_RANGE_MSG_EVENT,0,0); assert(pendingEventId==id);
+      Inject(APP_RANGE_MSG_ACK,id,syncEpoch,APP_RANGE_MSG_PEAK_EVENT,0,0); assert(!pendingEventId);
     }
-    Inject(RESULT,100,7,130,1,900);
-    Inject(PEAK_STATE,102,7,1,1,0);
+    Inject(APP_RANGE_MSG_RESULT,100,7,130,1,900);
+    Inject(APP_RANGE_MSG_PEAK_STATE,102,7,1,1,0);
     assert(appRangeStatus.peakUncertain && appRangeStatus.distanceMm==130);
-    Inject(RESULT,101,7,131,1,900); /* Older result must not erase newer uncertainty. */
+    Inject(APP_RANGE_MSG_RESULT,101,7,131,1,900); /* Older result must not erase newer uncertainty. */
     assert(appRangeStatus.peakUncertain);
-    Inject(PEAK_STATE,99,7,0,0,0); assert(appRangeStatus.peakUncertain);
-    Inject(RESULT,103,7,130,1,900); assert(!appRangeStatus.peakUncertain);
+    Inject(APP_RANGE_MSG_PEAK_STATE,99,7,0,0,0); assert(appRangeStatus.peakUncertain);
+    Inject(APP_RANGE_MSG_RESULT,103,7,130,1,900); assert(!appRangeStatus.peakUncertain);
     {
       RangePairDiag d={0};
       d.serial=5; d.reason=1; d.countA=2; d.countB=1; d.pairs=2;
@@ -86,13 +86,13 @@ int main(void)
       d.bestNs=-2885000; d.runnerNs=-3000000;
       d.bestScore=500000; d.runnerScore=450000; d.bestSpanNs=1250; d.runnerSpanNs=37500;
       testPayloadU=((uint64_t)d.bestSpanNs<<32)|d.runnerSpanNs; testPayloadV=d.serial;
-      Inject(PEAK_DIAG,104,7,RangePairDiag_Meta(&d),
+      Inject(APP_RANGE_MSG_PEAK_DIAG,104,7,RangePairDiag_Meta(&d),
         ((uint64_t)(uint32_t)d.bestNs<<32)|(uint32_t)d.runnerNs,
         ((uint64_t)d.bestScore<<32)|d.runnerScore);
       assert(appRangeStatus.pairFailure.serial==5 && appRangeStatus.pairFailure.runnerNs==-3000000);
-      testPayloadV=4; Inject(PEAK_DIAG,105,7,RangePairDiag_Meta(&d),0,0);
+      testPayloadV=4; Inject(APP_RANGE_MSG_PEAK_DIAG,105,7,RangePairDiag_Meta(&d),0,0);
       assert(appRangeStatus.pairFailure.serial==5);
-      testPayloadV=6; Inject(PEAK_DIAG,106,6,RangePairDiag_Meta(&d),0,0);
+      testPayloadV=6; Inject(APP_RANGE_MSG_PEAK_DIAG,106,6,RangePairDiag_Meta(&d),0,0);
       assert(appRangeStatus.pairFailure.serial==5);
       testPayloadU=0; testPayloadV=0;
     }
