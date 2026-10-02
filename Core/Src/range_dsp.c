@@ -1,16 +1,8 @@
 #include "range_dsp.h"
 #if APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_LEGACY
-#if APP_AUDIO_SAMPLE_RATE == 48000U
 #include "range_template_48k.h"
 #else
-#include "range_template.h"
-#endif
-#else
-#if APP_AUDIO_SAMPLE_RATE == 48000U
 #include "range_template_wide_48k.h"
-#else
-#include "range_template_wide.h"
-#endif
 #endif
 #include "app_board_config.h"
 #include <math.h>
@@ -24,7 +16,7 @@ uint64_t rangeDspMacs;
 #else
 #define COUNT_MACS(n) ((void)0)
 #endif
-#define CANDIDATE_RADIUS (14U * APP_AUDIO_SCALE)
+#define CANDIDATE_RADIUS (42U)
 #define CANDIDATE_POINTS (2U * CANDIDATE_RADIUS + 1U)
 
 #define MIN_SCORE ((APP_RANGE_MIN_QUALITY / 1000.0f) * \
@@ -47,23 +39,19 @@ static float Score(const int16_t *x, const int16_t *tpl)
 }
 
 /* Sparse first-stage gate only. Full-rate correlations determine all final
- * peak positions/qualities. The 48 kHz gate keeps the same 512 MACs and
- * 187.5 us start spacing as 16 kHz; no PCM is discarded from fine matching. */
+ * peak positions/qualities. The gate uses 512 MACs with 187.5 us start
+ * spacing; no PCM is discarded from fine matching. */
 static float CoarseScore(const int16_t *x)
 {
-#if APP_AUDIO_SAMPLE_RATE == 48000U
   unsigned i;
   float dot=0,xx=0,sum=0;
   COUNT_MACS(512);
-  for(i=0;i<RANGE_PULSE_SAMPLES;i+=APP_AUDIO_SCALE) {
+  for(i=0;i<RANGE_PULSE_SAMPLES;i+=3U) {
     float v=x[i]; dot+=v*rangeUp[i]; xx+=v*v; sum+=v;
   }
   xx-=sum*sum/512.0f;
   if(xx<512.0f*APP_RANGE_MIN_RMS*APP_RANGE_MIN_RMS) return 0;
   return dot*dot/(xx*RANGE_UP_COARSE_ENERGY);
-#else
-  return Score(x,rangeUp);
-#endif
 }
 
 #if APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_LEGACY
@@ -83,7 +71,7 @@ int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
     end = RANGE_WINDOW_SAMPLES - RANGE_SIGNATURE_SAMPLES + 1U;
   /* Preserve the 187.5 us coarse grid: a 4 kHz-centred chirp would
    * repeatedly hit a correlation null on a 125 us grid. */
-  for (k = first; k < end; k += 3*APP_AUDIO_SCALE)
+  for (k = first; k < end; k += 9U)
   {
     unsigned passed=0;
     v=CoarseScore(x + k);
@@ -94,7 +82,7 @@ int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
     /* Use all three pulses to choose a common arrival, rather than letting
      * a distorted first pulse choose a sidelobe for the complete signature.
      * Only refine candidates that passed the inexpensive coarse search. */
-    for (j = k > 8*APP_AUDIO_SCALE ? k - 8*APP_AUDIO_SCALE : 0; j <= k + 8*APP_AUDIO_SCALE && j <= RANGE_SCAN_ADVANCE; ++j)
+    for (j = k > 24U ? k - 24U : 0; j <= k + 24U && j <= RANGE_SCAN_ADVANCE; ++j)
     {
       v = Score(x + j, rangeUp);
       if(v>rangeDspDiagnostics.pulseMax[0]) rangeDspDiagnostics.pulseMax[0]=v;
@@ -118,8 +106,8 @@ int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
     }
     v = Energy(x + best, RANGE_PULSE_SAMPLES);
     {
-      float gap1=Energy(x + best + RANGE_PULSE_SAMPLES,128*APP_AUDIO_SCALE);
-      float gap2=Energy(x + best + RANGE_PULSE_STEP+RANGE_PULSE_SAMPLES,128*APP_AUDIO_SCALE);
+      float gap1=Energy(x + best + RANGE_PULSE_SAMPLES,384U);
+      float gap2=Energy(x + best + RANGE_PULSE_STEP+RANGE_PULSE_SAMPLES,384U);
       float ratio=(gap1>gap2 ? gap1:gap2)/v;
       if(!rangeDspDiagnostics.haveGap || ratio<rangeDspDiagnostics.gapMinRatio)
         rangeDspDiagnostics.gapMinRatio=ratio;
@@ -151,8 +139,8 @@ int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
         unsigned center=best+pulse*RANGE_PULSE_STEP;
         const int16_t *tpl=pulse==1 ? rangeDown : rangeUp;
         float strongest=-1;
-        chosen=center; start=center>3*APP_AUDIO_SCALE ? center-3*APP_AUDIO_SCALE : 0;
-        finish=center+3*APP_AUDIO_SCALE;
+        chosen=center; start=center>9U ? center-9U : 0;
+        finish=center+9U;
         if(finish>RANGE_WINDOW_SAMPLES-RANGE_PULSE_SAMPLES) finish=RANGE_WINDOW_SAMPLES-RANGE_PULSE_SAMPLES;
         for(at=start;at<=finish;++at) {
           float score=Score(x+at,tpl);
@@ -179,18 +167,18 @@ int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
   /* Fixed-size scratch, no heap. Compare before/after slice boundaries so an
    * earlier sidelobe is not accepted merely because the main peak is in the
    * next slice. Extra signature margin keeps the lookahead inside the window. */
-  float joint[104*APP_AUDIO_SCALE], weakest[104*APP_AUDIO_SCALE];
+  float joint[312U], weakest[312U];
   const float threshold=APP_RANGE_WIDE_SCORE>MIN_SCORE ? APP_RANGE_WIDE_SCORE : MIN_SCORE;
   unsigned start,finish,k,j,n;
   if(first>=RANGE_SCAN_ADVANCE || end<=first) return 0;
   if(end>first+RANGE_SCAN_SLICE) end=first+RANGE_SCAN_SLICE;
   if(end>RANGE_SCAN_ADVANCE) end=RANGE_SCAN_ADVANCE;
-  start=first>3*APP_AUDIO_SCALE ? first-3*APP_AUDIO_SCALE : 0;
-  finish=end+APP_RANGE_WIDE_LOOKAHEAD*APP_AUDIO_SCALE+3*APP_AUDIO_SCALE;
+  start=first>9U ? first-9U : 0;
+  finish=end+APP_RANGE_WIDE_LOOKAHEAD*3U+9U;
   if(finish>RANGE_WINDOW_SAMPLES-RANGE_SIGNATURE_SAMPLES+1)
     finish=RANGE_WINDOW_SAMPLES-RANGE_SIGNATURE_SAMPLES+1;
   n=finish-start;
-  if(n>104*APP_AUDIO_SCALE) return 0;
+  if(n>312U) return 0;
   for(k=0;k<n;++k) {
     float a,b,c;
     if(CoarseScore(x+start+k)<threshold*0.5f) { joint[k]=0; weakest[k]=0; continue; }
@@ -203,7 +191,7 @@ int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
     joint[k]=a+b+c; weakest[k]=fminf(a,fminf(b,c));
   }
   for(k=first;k<end;++k) {
-    unsigned at=k-start,lo=at>3*APP_AUDIO_SCALE ? at-3*APP_AUDIO_SCALE : 0,hi=at+3*APP_AUDIO_SCALE;
+    unsigned at=k-start,lo=at>9U ? at-9U : 0,hi=at+9U;
     float peak=joint[at],strongest=peak,shift=0;
     int local=1;
     if(peak==0) continue;
@@ -211,26 +199,26 @@ int RangeDsp_Find(const int16_t *x, unsigned first, unsigned end,
     for(j=lo;j<=hi;++j)
       if(joint[j]>peak || (j<at && joint[j]==peak)) local=0;
     if(!local) continue;
-    hi=at+APP_RANGE_WIDE_LOOKAHEAD*APP_AUDIO_SCALE;
+    hi=at+APP_RANGE_WIDE_LOOKAHEAD*3U;
     if(hi>=n) hi=n-1;
     for(j=at+1;j<=hi;++j) if(joint[j]>strongest) strongest=joint[j];
     if(peak<strongest*APP_RANGE_WIDE_RELATIVE) continue;
     /* Each pulse must independently support this local arrival. */
     {
-      int minOffset=3*APP_AUDIO_SCALE,maxOffset=-(int)(3*APP_AUDIO_SCALE);
+      int minOffset=9U,maxOffset=-(int)(9U);
       unsigned pulse;
       for(pulse=0;pulse<3;++pulse) {
         unsigned center=k+pulse*RANGE_PULSE_STEP,chosen=center;
         const int16_t *tpl=pulse==1 ? rangeDown : rangeUp;
         float best=-1;
-        for(j=center>2*APP_AUDIO_SCALE ? center-2*APP_AUDIO_SCALE : 0;j<=center+2*APP_AUDIO_SCALE;++j) {
+        for(j=center>6U ? center-6U : 0;j<=center+6U;++j) {
           float score=Score(x+j,tpl);
           if(score>best) { best=score; chosen=j; }
         }
         if((int)chosen-(int)center<minOffset) minOffset=(int)chosen-(int)center;
         if((int)chosen-(int)center>maxOffset) maxOffset=(int)chosen-(int)center;
       }
-      if(maxOffset-minOffset>APP_AUDIO_SCALE) continue;
+      if(maxOffset-minOffset>3U) continue;
       rangeDspPeakSpreadSamples=(uint32_t)(maxOffset-minOffset);
     }
     /* Use un-gated adjacent correlations for sub-sample interpolation. */
@@ -275,7 +263,7 @@ void RangeDsp_Candidates(const int16_t *x,float position,RangeDspPeaks *out)
     if((k==lo && lo!=0) || k==hi) continue;
     if((k>lo && joint[k-lo]<joint[k-lo-1]) || joint[k-lo]<=joint[k-lo+1]) continue;
     for(p=0;p<3;++p) {
-      unsigned at=k,search,begin=k>APP_AUDIO_SCALE ? k-APP_AUDIO_SCALE : 0,finish=k+APP_AUDIO_SCALE;
+      unsigned at=k,search,begin=k>3U ? k-3U : 0,finish=k+3U;
       float v,l,r,shift=0,d;
       if(begin<lo) begin=lo;
       if(finish>hi) finish=hi;
@@ -297,7 +285,7 @@ void RangeDsp_Candidates(const int16_t *x,float position,RangeDspPeaks *out)
     for(i=0;i<n;++i) {
       int same=1;
       for(p=0;p<3;++p)
-        if(fabsf(candidate.position[p]-candidates[i].position[p])>0.75f*APP_AUDIO_SCALE) same=0;
+        if(fabsf(candidate.position[p]-candidates[i].position[p])>2.25f) same=0;
       if(same) break;
     }
     if(i<n) continue;

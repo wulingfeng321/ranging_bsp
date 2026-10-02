@@ -46,8 +46,8 @@ static void Inject(uint8_t type, uint64_t remote, uint32_t number, uint64_t targ
   memcpy(p->bytes, "RNG1", 4);
   p->bytes[4] = version; p->bytes[5] = type;
   p->bytes[6] = APP_PEER_ROLE; p->bytes[7] = 32;
-  Put64(p->bytes + 8, remote); Put32(p->bytes + 16, number);
-  Put64(p->bytes + 20, target); Put32(p->bytes + 28, value);
+  AppWire_Put64BE(p->bytes + 8, remote); AppWire_Put32BE(p->bytes + 16, number);
+  AppWire_Put64BE(p->bytes + 20, target); AppWire_Put32BE(p->bytes + 28, value);
   Receive(NULL, socket, p, &peer, port);
   assert(allocated == 0);
 }
@@ -71,7 +71,7 @@ int main(void)
   RX(TEST_ACK, remote, oldTest, session, testValue);
   assert(appNetStatus.testAck == 1 && !testPending);
   RX(TEST, remote, 18, session, 1234);
-  assert(sent[5] == TEST_ACK && Get32(sent + 28) == 1234);
+  assert(sent[5] == TEST_ACK && AppWire_Get32BE(sent + 28) == 1234);
   before = appNetStatus.rx;
   RX(TEST, remote, 18, session, 1234); assert(appNetStatus.rx == before);
   Inject(HEARTBEAT, remote, 19, session, 0, 2, 5000, 32);

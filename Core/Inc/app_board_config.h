@@ -23,15 +23,14 @@
 #endif
 
 #define APP_UDP_PORT 5000U
-/* Both boards use the same rate. 16 kHz is retained for regression. */
+/* Firmware, DMA buffers and detector templates are fixed at 48 kHz. */
 #ifndef APP_AUDIO_SAMPLE_RATE
 #define APP_AUDIO_SAMPLE_RATE 48000U
 #endif
-#if APP_AUDIO_SAMPLE_RATE != 16000U && APP_AUDIO_SAMPLE_RATE != 48000U
-#error Supported audio rates are 16000 and 48000
+#if APP_AUDIO_SAMPLE_RATE != 48000U
+#error This firmware supports only 48000 Hz
 #endif
-#define APP_AUDIO_SCALE (APP_AUDIO_SAMPLE_RATE / 16000U)
-#define APP_AUDIO_HALF_FRAMES (256U * APP_AUDIO_SCALE) /* 16 ms */
+#define APP_AUDIO_HALF_FRAMES 768U /* 16 ms */
 #define APP_AUDIO_SAMPLE_NS (1000000000.0 / APP_AUDIO_SAMPLE_RATE)
 /* Experimental ranging configuration: same on BOTH boards. */
 #define APP_RANGE_PORT 5001U

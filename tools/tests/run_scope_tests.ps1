@@ -10,6 +10,12 @@ $commands += "cl /nologo /utf-8 /O2 /DAPP_AUDIO_SAMPLE_RATE=48000 /DAPP_RANGE_AU
 $commands += 'if not "%errorlevel%"=="0" exit /b 1'
 $commands += "`"$out/dsp-diagnostics.exe`""
 $commands += 'if not "%errorlevel%"=="0" exit /b 1'
+foreach ($test in @('board_audio','wire','app_net')) {
+    $commands += "cl /nologo /utf-8 /O2 /wd4312 /Itools/tests/scope_stubs /Itools/tests/net_stubs /ICore/Inc /Fo`"$out/`" tools/tests/test_$test.c /Fe`"$out/$test.exe`""
+    $commands += 'if not "%errorlevel%"=="0" exit /b 1'
+    $commands += "`"$out/$test.exe`""
+    $commands += 'if not "%errorlevel%"=="0" exit /b 1'
+}
 foreach ($role in 1,2) {
     $common = "/nologo /utf-8 /O2 /DAPP_BOARD_ROLE=$role /DAPP_AUDIO_SAMPLE_RATE=48000 /Fo`"$out/`""
     # Cortex-M's fixed 32-bit SDRAM addresses are not dereferenced by this host test.

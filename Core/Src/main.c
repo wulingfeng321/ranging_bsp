@@ -30,6 +30,7 @@
 #include "app_range.h"
 #include "stm32746g_discovery_lcd.h"
 #include "app_mic_scope.h"
+#include "board_audio.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -181,6 +182,7 @@ int main(void)
   LCD_Grid_Init();
   AppCapture_Init();
   MicScope_Init();
+  BoardAudio_Init(AppRange_Audio,AppRange_AudioError);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -194,6 +196,7 @@ int main(void)
     AppNet_Process();
     AppRange_Process();
     AppCapture_Process();
+    BoardAudio_Process();
     MicScope_Process();
   }
   /* USER CODE END 3 */

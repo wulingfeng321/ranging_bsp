@@ -6,6 +6,8 @@
 extern volatile uint32_t appCaptureSaveRequest;
 void AppCapture_Init(void);
 void AppCapture_Process(void);
+/* Main loop: recording/saving is supported only on STANDARD. */
+void AppCapture_SetEnabled(int enabled);
 /* Audio ISR only; no SD or network work here. count is exclusive end sample. */
 void AppCapture_Audio(const volatile int16_t *pcm, uint32_t frames,
                       uint64_t count, uint64_t localNs, uint32_t epoch);

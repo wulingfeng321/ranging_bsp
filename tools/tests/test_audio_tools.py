@@ -47,8 +47,8 @@ class AudioToolsTests(unittest.TestCase):
         cls.temporary.cleanup()
 
     def test_default_formats_and_schedules(self):
-        self.assertEqual(len(list(self.output.glob("*.wav"))), 8)
-        for rate in (16000, 48000):
+        self.assertEqual(len(list(self.output.glob("*.wav"))), 5)
+        for rate in (48000,):
             for profile, amplitude in (("standard", 0.9), ("wide", 0.75)):
                 filename = audio_name(f"{profile}_repeat", rate, rate * 31 // 2)
                 metadata, pcm = read_wav(self.output / filename)
@@ -60,13 +60,13 @@ class AudioToolsTests(unittest.TestCase):
                 self.assertFalse(any(pcm[8 * rate + len(group):]))
 
     def test_firmware_templates_match_exactly(self):
-        for rate in (16000, 48000):
+        for rate in (48000,):
             for profile in ("standard", "wide"):
                 mode, frames = ("group", rate * 5 // 2) if profile == "standard" else ("repeat", rate * 31 // 2)
                 source = self.output / audio_name(f"{profile}_{mode}", rate, frames)
                 exported = self.output / f"{profile}_{rate}.h"
                 export_template(source, exported, profile, rate)
-                suffix = "_48k" if rate == 48000 else ""
+                suffix = "_48k"
                 firmware = ROOT / f"Core/Inc/range_template{'_wide' if profile == 'wide' else ''}{suffix}.h"
                 self.assertEqual(template_arrays(exported), template_arrays(firmware))
 
@@ -88,11 +88,11 @@ class AudioToolsTests(unittest.TestCase):
     def test_parameter_injection_and_output_path(self):
         custom = self.output / "custom.wav"
         with redirect_stdout(io.StringIO()):
-            generate.main(["standard", "--sample-rate", "16000", "--rounds", "2",
+            generate.main(["standard", "--sample-rate", "48000", "--rounds", "2",
                            "--signatures", "2", "--interval", "0.6", "--gap-seconds", "0.2",
                            "--tail-seconds", "0.3", "--amplitude", "0.4", "--output", str(custom)])
         metadata, pcm = read_wav(custom)
-        self.assertEqual(metadata, (16000, 1, 2, 46400))
+        self.assertEqual(metadata, (48000, 1, 2, 139200))
         self.assertLessEqual(max(map(abs, pcm)), round(0.4 * 32767))
         with redirect_stdout(io.StringIO()):
             generate.main(["position", "--duration", "0.025", "--interval", "0.02",
@@ -100,7 +100,7 @@ class AudioToolsTests(unittest.TestCase):
         self.assertEqual(read_wav(self.output / "nested/position_48000hz_0p025s.wav")[0][-1], 1200)
 
     def test_invalid_inputs_do_not_create_files(self):
-        cases = [["sine", "--frequency", "24000"], ["sine", "--duration", "nan"],
+        cases = [["standard", "--sample-rate", "16000"], ["wide", "--sample-rate", "16000"], ["sine", "--frequency", "24000"], ["sine", "--duration", "nan"],
                  ["standard", "--rounds", "0"], ["standard", "--interval", "0.01"],
                  ["position", "--sample-rate", "16000"], ["position", "--interval", "0.001"],
                  ["wide", "--amplitude", "1.1"], ["sine", "--output", str(self.output / "invalid.py")]]

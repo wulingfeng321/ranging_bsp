@@ -1,3 +1,4 @@
+#include "app_wire.h"
 #include "app_net.h"
 #include "app_board_config.h"
 #include "main.h"
@@ -28,25 +29,6 @@ static uint32_t lastRx, lastSend, peerSeq;
 static uint8_t helloPending, testPending, havePeerSeq;
 uint64_t AppNet_LocalSession(void) { return session; }
 uint64_t AppNet_PeerSession(void) { return peerSession; }
-
-static void Put32(uint8_t *p, uint32_t v)
-{
-  p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16);
-  p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v;
-}
-static uint32_t Get32(const uint8_t *p)
-{
-  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-         ((uint32_t)p[2] << 8) | p[3];
-}
-static void Put64(uint8_t *p, uint64_t v)
-{
-  Put32(p, (uint32_t)(v >> 32)); Put32(p + 4, (uint32_t)v);
-}
-static uint64_t Get64(const uint8_t *p)
-{
-  return ((uint64_t)Get32(p) << 32) | Get32(p + 4);
-}
 
 /* Existing clock setup supplies PLLSAIP = 48 MHz. Hardware entropy keeps
  * boot sessions distinct even after power loss; never substitute a fixed ID. */
@@ -83,8 +65,8 @@ static int Send(uint8_t type, uint32_t number, uint64_t target, uint32_t value)
   struct pbuf *p;
   err_t err;
   b[5] = type;
-  Put64(b + 8, session); Put32(b + 16, number);
-  Put64(b + 20, target); Put32(b + 28, value);
+  AppWire_Put64BE(b + 8, session); AppWire_Put32BE(b + 16, number);
+  AppWire_Put64BE(b + 20, target); AppWire_Put32BE(b + 28, value);
   p = pbuf_alloc(PBUF_TRANSPORT, MSG_SIZE, PBUF_RAM);
   if (p == NULL) { ++appNetStatus.txErrors; return 0; }
   err = pbuf_take(p, b, MSG_SIZE);
@@ -115,8 +97,8 @@ static void Receive(void *arg, struct udp_pcb *pcb, struct pbuf *p,
       p->tot_len != MSG_SIZE || pbuf_copy_partial(p, b, MSG_SIZE, 0) != MSG_SIZE)
   { pbuf_free(p); ++appNetStatus.rejected; return; }
   pbuf_free(p);
-  type = b[5]; remote = Get64(b + 8); number = Get32(b + 16);
-  target = Get64(b + 20); value = Get32(b + 28);
+  type = b[5]; remote = AppWire_Get64BE(b + 8); number = AppWire_Get32BE(b + 16);
+  target = AppWire_Get64BE(b + 20); value = AppWire_Get32BE(b + 28);
   if (memcmp(b, "RNG1", 4) || b[4] != 1 || b[6] != APP_PEER_ROLE ||
       b[7] != MSG_SIZE || remote == 0 || type < HELLO || type > TEST_ACK)
     goto reject;

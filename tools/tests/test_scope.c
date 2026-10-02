@@ -11,11 +11,10 @@ int AppRange_ClearClapStats(void) { if(busy || !AppRange_SettingsReady()) return
 int AppCapture_Busy(void) { return busy; }
 const char *AppCapture_Text(void) { return "CAP HELD / A USER"; }
 const char *AppCapture_Detail(void) { return ""; }
-#include "../../../../Utilities/Fonts/font8.c"
-#include "../../../../Utilities/Fonts/font12.c"
-#include "../../../../Utilities/Fonts/font16.c"
-#include "../../../../Utilities/Fonts/font24.c"
-SAI_HandleTypeDef haudio_in_sai;
+#include "../../Drivers/Fonts/font8.c"
+#include "../../Drivers/Fonts/font12.c"
+#include "../../Drivers/Fonts/font16.c"
+#include "../../Drivers/Fonts/font24.c"
 LTDC_HandleTypeDef hLtdcHandler;
 TestLtdc testLtdc;
 AppNetStatus appNetStatus;
@@ -57,12 +56,7 @@ void AppRange_AudioError(void) { ++errors; }
 void AppRange_Audio(const volatile int16_t *pcm,uint32_t n) { (void)pcm; (void)n; }
 uint8_t BSP_TS_Init(uint16_t x,uint16_t y) { assert(x==480 && y==272); return 0; }
 uint8_t BSP_TS_GetState(TS_StateTypeDef *s) { *s=finger; return (uint8_t)touchFail; }
-int BSP_AUDIO_IN_Init(uint32_t rate,int bits,int channels)
-{ assert(rate==APP_AUDIO_SAMPLE_RATE && bits==16 && channels==2); return AUDIO_OK; }
-int BSP_AUDIO_IN_Record(uint16_t *data,uint32_t words)
-{ (void)data; assert(words==APP_AUDIO_HALF_FRAMES*4); return AUDIO_OK; }
-int HAL_SAI_GetState(SAI_HandleTypeDef *sai) { (void)sai; return HAL_SAI_STATE_BUSY_RX; }
-void HAL_NVIC_DisableIRQ(int irq) { (void)irq; }
+BoardAudioState BoardAudio_GetState(void) { return BOARD_AUDIO_RUNNING; }
 void BSP_LCD_SetTextColor(uint32_t color) { fg=color; }
 void BSP_LCD_SetBackColor(uint32_t color) { bg=color; }
 void BSP_LCD_SetFont(sFONT *f) { font=f; }
@@ -93,7 +87,7 @@ void BSP_LCD_SetLayerAddress_NoReload(int layer,uint32_t address)
 void BSP_LCD_Reload(int mode)
 { assert(mode==LCD_RELOAD_VERTICAL_BLANKING); ++flips; testLtdc.SRCR=LTDC_SRCR_VBR; }
 static void Step(uint32_t ms)
-{ masterClock=(uint64_t)ms*1000000ULL; ++micDmaBlocks; MicScope_Process(); }
+{ masterClock=(uint64_t)ms*1000000ULL; MicScope_Process(); }
 static void Save(const char *prefix,const char *name)
 {
   char path[512]; unsigned x,y; FILE *f;

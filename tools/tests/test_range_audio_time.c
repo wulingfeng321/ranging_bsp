@@ -17,7 +17,7 @@ int main(void)
     if(i>40) {
       double error=fabs(s.anchorNs-(double)truth);
       CHECK(s.ready);
-      CHECK(fabs(s.periodNs-APP_AUDIO_SAMPLE_NS*1.00008)<2.0/APP_AUDIO_SCALE);
+      CHECK(fabs(s.periodNs-APP_AUDIO_SAMPLE_NS*1.00008)<2.0/3U);
       CHECK(error<25000.0);
       if(error>worst) worst=error;
     }

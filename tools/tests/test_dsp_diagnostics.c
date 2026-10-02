@@ -34,7 +34,7 @@ int main(void)
   for(i=0;i<RANGE_PULSE_SAMPLES;++i) if(i%3) audio[i]=(int16_t)(-rangeUp[i]/2);
   assert(!Find() && rangeDspDiagnostics.failPulse[0]>0);
   Reset(3);
-  for(p=0;p<2;++p) for(i=0;i<128*APP_AUDIO_SCALE;++i)
+  for(p=0;p<2;++p) for(i=0;i<384U;++i)
     audio[p*RANGE_PULSE_STEP+RANGE_PULSE_SAMPLES+i]=(int16_t)(i%2 ? 32767:-32767);
   assert(!Find() && rangeDspDiagnostics.gapRejected>0);
   assert(rangeDspDiagnostics.haveGap && rangeDspDiagnostics.gapMinRatio>APP_RANGE_MAX_GAP_ENERGY_RATIO);

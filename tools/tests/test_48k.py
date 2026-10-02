@@ -7,7 +7,7 @@ import wave
 from pathlib import Path
 from audio_paths import standard_audio
 import numpy as np
-from analyze_joint_detector import DspPeaks, Peaks
+from dsp_types import DspPeaks, Peaks
 
 lib = c.CDLL(sys.argv[1])
 assert lib.Test_SampleRate() == 48000

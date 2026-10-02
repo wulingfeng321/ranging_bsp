@@ -6,12 +6,12 @@ import wave
 from pathlib import Path
 from audio_paths import standard_audio
 import numpy as np
-from analyze_joint_detector import DspPeaks
+from dsp_types import DspPeaks
 
 root = Path(__file__).resolve().parents[2]
 report = []
-for rate in (16000, 48000):
-    scale = rate//16000
+for rate in (48000,):
+    scale = 3
     size, advance, step = 2304*scale, 256*scale, 64*scale
     lib = c.CDLL(str(Path(sys.argv[1]) / f'joint{rate}.dll'))
     assert lib.Test_SampleRate()==rate
@@ -42,4 +42,3 @@ for rate in (16000, 48000):
     report.append({'sample_rate':rate,'events':hits,'correlation_macs':lib.Test_MacCount(0),
                    'max_macs_one_slice_with_candidates':maximum})
 print(json.dumps(report,indent=2))
-print(f"48k/16k total correlation work ratio: {report[1]['correlation_macs']/report[0]['correlation_macs']:.3f}")

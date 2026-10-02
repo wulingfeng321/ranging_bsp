@@ -12,21 +12,14 @@
 void AppCapture_Audio(const volatile int16_t *p,uint32_t n,uint64_t c,uint64_t t,uint32_t e)
 { (void)p;(void)n;(void)c;(void)t;(void)e; }
 void AppCapture_Trigger(void) {}
+void AppCapture_SetEnabled(int enabled) { (void)enabled; }
 void AppCapture_Log(const char *format,...) { (void)format; }
 static int captureBusy;
 int AppCapture_Busy(void) { return captureBusy; }
 #if APP_RANGE_AUDIO_PROFILE == APP_RANGE_AUDIO_LEGACY
-#if APP_AUDIO_SAMPLE_RATE == 48000U
 #include "range_template_48k.h"
 #else
-#include "range_template.h"
-#endif
-#else
-#if APP_AUDIO_SAMPLE_RATE == 48000U
 #include "range_template_wide_48k.h"
-#else
-#include "range_template_wide.h"
-#endif
 #endif
 struct netif gnetif={1};
 AppNetStatus appNetStatus;
@@ -77,9 +70,9 @@ static void Inject(uint8_t type,uint32_t id,uint32_t epoch,uint64_t x,uint64_t y
   struct pbuf *p=pbuf_alloc(0,WIRE_SIZE,0);
   memset(p->bytes,0,WIRE_SIZE);memcpy(p->bytes,"RAN2",4);
   p->bytes[4]=RANGE_WIRE_VERSION;p->bytes[5]=type;p->bytes[6]=APP_PEER_ROLE;p->bytes[7]=WIRE_SIZE;
-  P64(p->bytes+8,222);P64(p->bytes+16,111);P32(p->bytes+24,id);P32(p->bytes+28,epoch);
-  P64(p->bytes+32,x);P64(p->bytes+40,y);P64(p->bytes+48,z);
-  P64(p->bytes+56,testPayloadU);P64(p->bytes+64,testPayloadV);P32(p->bytes+72,testRevision ? testRevision : uiRevision);
+  AppWire_Put64BE(p->bytes+8,222);AppWire_Put64BE(p->bytes+16,111);AppWire_Put32BE(p->bytes+24,id);AppWire_Put32BE(p->bytes+28,epoch);
+  AppWire_Put64BE(p->bytes+32,x);AppWire_Put64BE(p->bytes+40,y);AppWire_Put64BE(p->bytes+48,z);
+  AppWire_Put64BE(p->bytes+56,testPayloadU);AppWire_Put64BE(p->bytes+64,testPayloadV);AppWire_Put32BE(p->bytes+72,testRevision ? testRevision : uiRevision);
   rangeRxTimestamp=clockNs;Receive(NULL,pcb,p,&peer,5001);assert(balance==0);
 }
 int main(void)

@@ -52,7 +52,7 @@ def create_parser():
         command = commands.add_parser(kind, help=f"generate {kind} audio")
         output_options(command)
         command.add_argument("--sample-rate", type=int,
-                             choices=(48000,) if kind == "position" else (16000, 48000), default=48000)
+                             choices=(48000,), default=48000)
         command.add_argument("--amplitude", type=amplitude_value, default=default_amplitude,
                              help="fraction of PCM full scale, 0..1")
         if kind in ("standard", "wide"):
@@ -70,7 +70,7 @@ def create_parser():
                 command.add_argument("--frequency", type=positive_seconds, default=500.0, help="sine frequency, Hz")
     all_audio = commands.add_parser("all", help="generate the three current 48 kHz playback files")
     output_options(all_audio, single=False)
-    all_audio.add_argument("--regression", action="store_true", help="also generate five standard/WIDE regression inputs")
+    all_audio.add_argument("--regression", action="store_true", help="also generate two 48 kHz standard/WIDE regression inputs")
     return parser
 
 
@@ -118,10 +118,7 @@ def main(argv=None):
             return
         presets = [["standard"], ["position"], ["sine"]]
         if args.regression:
-            presets += [["standard", "--group-only"],
-                        ["standard", "--sample-rate", "16000", "--group-only"],
-                        ["standard", "--sample-rate", "16000"],
-                        ["wide", "--sample-rate", "16000"], ["wide"]]
+            presets += [["standard", "--group-only"], ["wide"]]
         for preset in presets:
             generate_one(parser.parse_args(preset + ["--output-dir", str(args.output_dir)]))
     except (ValueError, OSError) as error:

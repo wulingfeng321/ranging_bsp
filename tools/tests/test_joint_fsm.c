@@ -63,7 +63,7 @@ int main(void)
     DetectionReady(stamp,950);
     assert(pendingPeaks.count==1 && pendingPeaks.peak[0].offsetNs[2]>=-2 && pendingPeaks.peak[0].offsetNs[2]<=2);
     lastSyncMs=HAL_GetTick(); lastSyncNs=clockNs;
-    AppRange_Process(); assert(sent[5]==PEAK_EVENT && G32(sent+24)==pendingEventId);
+    AppRange_Process(); assert(sent[5]==PEAK_EVENT && AppWire_Get32BE(sent+24)==pendingEventId);
     {
       uint8_t original[WIRE_SIZE]; uint32_t id=pendingEventId;
       memcpy(original,sent,WIRE_SIZE);
@@ -102,9 +102,9 @@ int main(void)
     int16_t pcm[APP_AUDIO_HALF_FRAMES*2]; uint32_t before=appRangeStatus.events;
     ClearMeasurements(); appRangeStatus.locked=1;
     assert(!appRangeStatus.pairFailure.serial);
-    for(i=0;i<24576*APP_AUDIO_SCALE;i+=APP_AUDIO_HALF_FRAMES) {
+    for(i=0;i<73728U;i+=APP_AUDIO_HALF_FRAMES) {
       for(k=0;k<APP_AUDIO_HALF_FRAMES;++k) {
-        int at=(int)((i+k)%(APP_AUDIO_SAMPLE_RATE/2))-129*APP_AUDIO_SCALE; int16_t v=0;
+        int at=(int)((i+k)%(APP_AUDIO_SAMPLE_RATE/2))-387U; int16_t v=0;
         if(at>=0 && at<RANGE_PULSE_SAMPLES) v=rangeUp[at];
         else if(at>=RANGE_PULSE_STEP && at<RANGE_PULSE_STEP+RANGE_PULSE_SAMPLES) v=rangeDown[at-RANGE_PULSE_STEP];
         else if(at>=2*RANGE_PULSE_STEP && at<RANGE_SIGNATURE_SAMPLES) v=rangeUp[at-2*RANGE_PULSE_STEP];

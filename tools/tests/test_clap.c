@@ -50,7 +50,7 @@ static void CheckHistory(void)
     rev=uiRevision;ClapRecord(110);Inject(UI_REQUEST,999,0,4,0,0);
     assert(uiRevision==rev && appClapStatus.recentCount==1);
   } else {
-    id=uiPendingId;UiProcess(HAL_GetTick());assert(sent[5]==UI_REQUEST && G64(sent+32)==4);
+    id=uiPendingId;UiProcess(HAL_GetTick());assert(sent[5]==UI_REQUEST && AppWire_Get64BE(sent+32)==4);
     testRevision=rev+1;testPayloadU=syncEpoch;testPayloadV=id;
     Inject(UI_STATE,rev+1,0,350,APP_PAGE_CLAP,0);
     assert(AppRange_SettingsReady() && !appClapStatus.recentCount);

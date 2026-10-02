@@ -1,3 +1,4 @@
+#include "app_wire.h"
 /* Round recorder. Dedicated non-cacheable SDRAM, independent of DSP/LCD.
  * On-card RNG1 = 4096-byte NUL-padded JSON + stereo PCM + anchors + CSV log.
  * All numeric binary fields little endian. No native C structs go on the wire.
@@ -45,6 +46,7 @@ enum { IDLE, WAIT_INFO, OPEN_A, WRITE_A, OPEN_B, READ_B, FINISH,
 static struct udp_pcb *socket;
 static ip_addr_t peer;
 static volatile uint32_t blocks, validBlocks, frozen, endBlock;
+static volatile uint8_t captureEnabled=1;
 static uint32_t triggered, logBytes, logOverflow, totalBytes, firstBlock, savedBlocks;
 static uint32_t state, transaction, peerTransaction, lastReset, lastArm;
 static uint32_t lastSend, deadline, peerSize, offset, fileOpen, runNumber;
@@ -60,12 +62,6 @@ static uint32_t aHash, bHash;
 volatile uint32_t appCaptureSaveRequest;
 extern const Diskio_drvTypeDef CaptureSD_Driver;
 
-static void P32(uint8_t *p,uint32_t v)
-{ p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);p[2]=(uint8_t)(v>>16);p[3]=(uint8_t)(v>>24); }
-static uint32_t G32(const uint8_t *p)
-{ return p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24); }
-static void P64(uint8_t *p,uint64_t v) { P32(p,(uint32_t)v);P32(p+4,(uint32_t)(v>>32)); }
-static uint64_t G64(const uint8_t *p) { return G32(p)|((uint64_t)G32(p+4)<<32); }
 static uint32_t Hash(uint32_t h,const uint8_t *p,uint32_t n)
 { while(n--) { h^=*p++;h*=16777619U; } return h; }
 
@@ -73,11 +69,25 @@ int AppCapture_Busy(void) { return hold!=0; }
 const char *AppCapture_Text(void) { return text; }
 const char *AppCapture_Detail(void) { return detail; }
 
+/* Main-loop transition only. Do not retain PCM from other pages in a saved
+ * STANDARD round; hold prevents changing a round during its transfer. */
+void AppCapture_SetEnabled(int enabled)
+{
+  uint32_t mask;
+  enabled=enabled!=0;
+  if(hold || captureEnabled==enabled) return;
+  mask=__get_PRIMASK();__disable_irq();
+  captureEnabled=(uint8_t)enabled;blocks=validBlocks=endBlock=0;frozen=0;
+  __set_PRIMASK(mask);
+  triggered=logBytes=logOverflow=totalBytes=0;
+  strcpy(text,enabled ? "CAP ARM" : "CAP OFF");detail[0]=0;
+}
+
 void AppCapture_Log(const char *format,...)
 {
   char line[512];
   int n; va_list args;
-  if(hold) return;
+  if(hold || !captureEnabled) return;
   va_start(args,format);n=vsnprintf(line,sizeof(line),format,args);va_end(args);
   if(n<0 || n>=(int)sizeof(line) || logBytes+(uint32_t)n>=LOG_SIZE) { ++logOverflow;return; }
   memcpy(LOG+logBytes,line,(uint32_t)n);logBytes+=(uint32_t)n;
@@ -88,11 +98,11 @@ void AppCapture_Audio(const volatile int16_t *pcm,uint32_t frames,
 {
   uint32_t i,index,stop;
   uint8_t *anchor;
-  if(frozen || frames!=APP_AUDIO_HALF_FRAMES) return;
+  if(!captureEnabled || frozen || frames!=APP_AUDIO_HALF_FRAMES) return;
   index=blocks%BLOCKS;
   for(i=0;i<frames*2U;++i) PCM[index*APP_AUDIO_HALF_FRAMES*2U+i]=pcm[i];
   anchor=ANCHORS+index*24U;
-  P64(anchor,count);P64(anchor+8,localNs);P32(anchor+16,epoch);P32(anchor+20,frames);
+  AppWire_Put64LE(anchor,count);AppWire_Put64LE(anchor+8,localNs);AppWire_Put32LE(anchor+16,epoch);AppWire_Put32LE(anchor+20,frames);
   ++blocks;if(validBlocks<BLOCKS) ++validBlocks;
   stop=endBlock;
   if(stop && blocks>=stop) frozen=1;
@@ -101,7 +111,7 @@ void AppCapture_Audio(const volatile int16_t *pcm,uint32_t frames,
 static void Trigger(void)
 {
   uint32_t mask;
-  if(triggered || hold) return;
+  if(!captureEnabled || triggered || hold) return;
   mask=__get_PRIMASK();__disable_irq();
   endBlock=blocks+750U;triggered=1;
   __set_PRIMASK(mask);
@@ -142,7 +152,7 @@ static void Seal(void)
   sealedPeer=AppNet_PeerSession();
   memset(HEADER,0,HEADER_SIZE);
   (void)snprintf(HEADER,HEADER_SIZE,
-    "{\"format\":\"RNG1\",\"firmware_base\":\"0e1319b+clap1\",\"board\":\"%s\","
+    "{\"format\":\"RNG1\",\"firmware_base\":\"48k-standard\",\"board\":\"%s\","
     "\"rate\":%lu,\"channels\":2,\"sample_bytes\":2,\"frames\":%lu,\"header_bytes\":4096,"
     "\"anchor_count\":%lu,\"anchor_bytes\":24,\"log_bytes\":%lu,\"log_overflow\":%lu,"
     "\"triggered\":%lu,\"temperature_deci_c\":%d,\"profile\":%d,\"joint\":%d,"
@@ -185,9 +195,9 @@ static void Send(uint32_t type,uint32_t id,uint32_t value,uint32_t length)
 {
   uint8_t *b=(uint8_t *)scratch;struct pbuf *p;
   if(!socket || !appNetStatus.online) return;
-  memcpy(b,"CAP1",4);P32(b+4,type);P64(b+8,AppNet_LocalSession());P64(b+16,AppNet_PeerSession());
-  P32(b+24,id);P32(b+28,value);P32(b+32,length);
-  P32(b+36,Hash(Hash(2166136261U,b,36),b+PREFIX,length));
+  memcpy(b,"CAP1",4);AppWire_Put32LE(b+4,type);AppWire_Put64LE(b+8,AppNet_LocalSession());AppWire_Put64LE(b+16,AppNet_PeerSession());
+  AppWire_Put32LE(b+24,id);AppWire_Put32LE(b+28,value);AppWire_Put32LE(b+32,length);
+  AppWire_Put32LE(b+36,Hash(Hash(2166136261U,b,36),b+PREFIX,length));
   p=pbuf_alloc(PBUF_TRANSPORT,(u16_t)(PREFIX+length),PBUF_RAM);
   if(p) { if(pbuf_take(p,b,(u16_t)(PREFIX+length))==ERR_OK) (void)udp_sendto(socket,p,&peer,PORT);pbuf_free(p); }
 }
@@ -207,11 +217,12 @@ static void Receive(void *arg,struct udp_pcb *pcb,struct pbuf *p,const ip_addr_t
   uint8_t b[PREFIX+CHUNK];uint32_t type,id,value,n;
   (void)arg;(void)pcb;
   if(!p) return;
+  if(!captureEnabled) { pbuf_free(p);return; }
   if(port!=PORT || !ip_addr_cmp(addr,&peer) || p->tot_len<PREFIX || p->tot_len>sizeof(b)) { pbuf_free(p);return; }
   n=p->tot_len;(void)pbuf_copy_partial(p,b,(u16_t)n,0);pbuf_free(p);
-  if(memcmp(b,"CAP1",4) || G64(b+8)!=AppNet_PeerSession() || G64(b+16)!=AppNet_LocalSession() ||
-     G32(b+32)!=n-PREFIX || G32(b+36)!=Hash(Hash(2166136261U,b,36),b+PREFIX,n-PREFIX)) return;
-  type=G32(b+4);id=G32(b+24);value=G32(b+28);n-=PREFIX;
+  if(memcmp(b,"CAP1",4) || AppWire_Get64LE(b+8)!=AppNet_PeerSession() || AppWire_Get64LE(b+16)!=AppNet_LocalSession() ||
+     AppWire_Get32LE(b+32)!=n-PREFIX || AppWire_Get32LE(b+36)!=Hash(Hash(2166136261U,b,36),b+PREFIX,n-PREFIX)) return;
+  type=AppWire_Get32LE(b+4);id=AppWire_Get32LE(b+24);value=AppWire_Get32LE(b+28);n-=PREFIX;
   if(type==TRIGGER && id==lastArm && !n && !hold) { Trigger();return; }
   if(APP_BOARD_ROLE==APP_BOARD_B) {
     if(type==FREEZE && !n && id && id!=lastReset &&
@@ -261,6 +272,7 @@ static int Open(const char *name)
 
 static void StartSave(void)
 {
+  if(!captureEnabled || AppRange_Page()!=APP_PAGE_STANDARD) return;
   if(!socket || !appNetStatus.online) { strcpy(text,"CAP NEED PEER");return; }
   if(hold && sealedPeer!=AppNet_PeerSession()) { strcpy(text,"CAP PEER RESET");return; }
   Seal();roundPeer=AppNet_PeerSession();
@@ -288,15 +300,16 @@ void AppCapture_Init(void)
 void AppCapture_Process(void)
 {
   uint32_t now=HAL_GetTick(),n;FRESULT r;
+  AppCapture_SetEnabled(AppRange_Page()==APP_PAGE_STANDARD);
   if(APP_BOARD_ROLE==APP_BOARD_A) {
     uint32_t raw=BSP_PB_GetState(BUTTON_KEY);
     if(raw!=buttonRaw) { buttonRaw=raw;buttonTick=now; }
     if(now-buttonTick>=40U && raw!=buttonStable) {
       buttonStable=raw;
-      if(raw && AppRange_Page()!=APP_PAGE_WAVE && AppRange_Page()!=APP_PAGE_POSITION && (state==IDLE || state==ERROR_STATE)) StartSave();
+      if(raw && AppRange_Page()==APP_PAGE_STANDARD && (state==IDLE || state==ERROR_STATE)) StartSave();
     }
     if(appCaptureSaveRequest==APP_CAPTURE_SAVE_REQUEST && (state==IDLE || state==ERROR_STATE)) {
-      appCaptureSaveRequest=0;if(AppRange_Page()!=APP_PAGE_WAVE && AppRange_Page()!=APP_PAGE_POSITION) StartSave();
+      appCaptureSaveRequest=0;if(AppRange_Page()==APP_PAGE_STANDARD) StartSave();
     }
   }
   /* StartSave seals/logs the round and stamps deadline with a fresh tick.

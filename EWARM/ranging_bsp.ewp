@@ -1094,6 +1094,9 @@
           <name>$PROJ_DIR$\..\Core\Src\app_mic_scope.c</name>
         </file>
         <file>
+          <name>$PROJ_DIR$\..\Core\Src\board_audio.c</name>
+        </file>
+        <file>
           <name>$PROJ_DIR$\..\Core\Src\app_net.c</name>
         </file>
         <file>

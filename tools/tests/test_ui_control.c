@@ -52,9 +52,9 @@ int main(void)
     Inject(UI_ACK,rev,0,0,0,0);
   } else {
     id=uiPendingId; UiProcess(HAL_GetTick());
-    assert(sent[5]==UI_REQUEST && G32(sent+24)==id);
+    assert(sent[5]==UI_REQUEST && AppWire_Get32BE(sent+24)==id);
     clockNs+=250000000; UiProcess(HAL_GetTick());
-    assert(sent[5]==UI_REQUEST && G32(sent+24)==id);
+    assert(sent[5]==UI_REQUEST && AppWire_Get32BE(sent+24)==id);
     testRevision=2; testPayloadU=7; testPayloadV=id;
     Inject(UI_STATE,2,0,350,APP_PAGE_WAVE,origin);
     assert(uiPage==APP_PAGE_WAVE && AppRange_SettingsReady() && !appRangeArrival.valid);

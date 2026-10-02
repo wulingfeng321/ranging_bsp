@@ -1,6 +1,6 @@
 param(
     [string]$IarBuild = 'C:/Program Files (x86)/IAR Systems/Embedded Workbench 8.2/common/bin/IarBuild.exe',
-    [ValidateSet(16000,48000)][int]$SampleRate = 48000,
+    [ValidateSet(48000)][int]$SampleRate = 48000,
     [ValidateSet('legacy','wide')][string[]]$Profiles = @('legacy','wide'),
     [switch]$JointPeaks
 )

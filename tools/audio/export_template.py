@@ -9,6 +9,8 @@ import wave
 
 
 def export_template(source, output, profile, rate):
+    if rate != 48000:
+        raise ValueError("only 48000 Hz templates are supported")
     with wave.open(str(source), "rb") as wav:
         if (wav.getframerate(), wav.getnchannels(), wav.getsampwidth()) != (rate, 1, 2):
             raise ValueError("expected matching sample rate, mono, PCM16")
@@ -29,7 +31,7 @@ def export_template(source, output, profile, rate):
         if any(value < -32768 or value > 32767 for value in values):
             raise ValueError("DC-removed template exceeds PCM16 range")
         lines += [f"#define RANGE_{name.upper()}_ENERGY {float(sum(x*x for x in values)):.1f}f",
-                  f"#define RANGE_{name.upper()}_COARSE_ENERGY {float(sum(x*x for x in values[::rate//16000])):.1f}f",
+                  f"#define RANGE_{name.upper()}_COARSE_ENERGY {float(sum(x*x for x in values[::3])):.1f}f",
                   f"static const int16_t range{name}[{pulse}] = {{"]
         lines += ["  " + ", ".join(map(str, values[i:i + 16])) + "," for i in range(0, pulse, 16)]
         lines.append("};")
@@ -41,7 +43,7 @@ def export_template(source, output, profile, rate):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=("standard", "wide"), default="standard")
-    parser.add_argument("--sample-rate", type=int, choices=(16000, 48000), default=48000)
+    parser.add_argument("--sample-rate", type=int, choices=(48000,), default=48000)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True, help="explicit C header destination")
     args = parser.parse_args(argv)

@@ -62,16 +62,16 @@ err_t udp_sendto(struct udp_pcb *p,struct pbuf *b,const ip_addr_t *a,u16_t port)
 static void Inject(uint32_t type,uint32_t id,uint32_t value,const uint8_t *data,uint32_t n,int corrupt)
 {
   struct pbuf *p=pbuf_alloc(0,(u16_t)(PREFIX+n),0);uint8_t *b=p->bytes;
-  memcpy(b,"CAP1",4);P32(b+4,type);P64(b+8,22);P64(b+16,11);P32(b+24,id);P32(b+28,value);P32(b+32,n);
+  memcpy(b,"CAP1",4);AppWire_Put32LE(b+4,type);AppWire_Put64LE(b+8,22);AppWire_Put64LE(b+16,11);AppWire_Put32LE(b+24,id);AppWire_Put32LE(b+28,value);AppWire_Put32LE(b+32,n);
   if(n) memcpy(b+PREFIX,data,n);
-  P32(b+36,Hash(Hash(2166136261U,b,36),b+PREFIX,n)^(corrupt?1:0));
+  AppWire_Put32LE(b+36,Hash(Hash(2166136261U,b,36),b+PREFIX,n)^(corrupt?1:0));
   Receive(NULL,&fakeSocket,p,&peer,PORT);
 }
 static void SimulatePeer(void)
 {
   uint32_t type,id,pos,n;uint8_t data[CHUNK];
   if(!pendingSize) return;
-  type=G32(pending+4);id=G32(pending+24);pos=G32(pending+28);pendingSize=0;
+  type=AppWire_Get32LE(pending+4);id=AppWire_Get32LE(pending+24);pos=AppWire_Get32LE(pending+28);pendingSize=0;
   if((dropMask&(1U<<type))!=0) { dropMask&=~(1U<<type);return; }
   if(type==FREEZE) Inject(INFO,id,peerBlobSize,NULL,0,0);
   else if(type==READ) { assert(pos<peerBlobSize);n=peerBlobSize-pos;if(n>CHUNK)n=CHUNK;memcpy(data,peerBlob+pos,n);Inject(DATA,id,pos,data,n,0); }
@@ -96,7 +96,7 @@ int main(int argc,char **argv)
   Seal();assert(savedBlocks==1000 && firstBlock==850);
   assert(ReadLocal(HEADER_SIZE,probe,4)==4 && (int16_t)(probe[0]|(probe[1]<<8))==850);
   ReadLocal(HEADER_SIZE+savedBlocks*APP_AUDIO_HALF_FRAMES*4U,probe,24);
-  assert(G64(probe)==851ULL*APP_AUDIO_HALF_FRAMES);
+  assert(AppWire_Get64LE(probe)==851ULL*APP_AUDIO_HALF_FRAMES);
   assert(strstr(HEADER,"\"frames\":768000")!=NULL);
   if(APP_BOARD_ROLE==APP_BOARD_A) {
     peerBlob=malloc(totalBytes);assert(peerBlob);peerBlobSize=totalBytes;
@@ -119,15 +119,15 @@ int main(int argc,char **argv)
         f=fopen(path,"wb");assert(f);assert(fwrite(files[i],1,sizes[i],f)==sizes[i]);fclose(f);
       }
     }
-    testPage=APP_PAGE_WAVE;
-    button=1;AppCapture_Process();tick+=41;AppCapture_Process();
-    appCaptureSaveRequest=APP_CAPTURE_SAVE_REQUEST;AppCapture_Process();
-    assert(state==IDLE && !hold && !appCaptureSaveRequest);
-    testPage=APP_PAGE_POSITION;
-    button=0;AppCapture_Process();tick+=41;AppCapture_Process();
-    button=1;AppCapture_Process();tick+=41;AppCapture_Process();
-    appCaptureSaveRequest=APP_CAPTURE_SAVE_REQUEST;AppCapture_Process();
-    assert(state==IDLE && !hold && !appCaptureSaveRequest);
+    for(testPage=APP_PAGE_CLAP;testPage<=APP_PAGE_POSITION;testPage=(AppPage)(testPage+1)) {
+      button=0;AppCapture_Process();tick+=41;AppCapture_Process();
+      button=1;AppCapture_Process();tick+=41;AppCapture_Process();
+      appCaptureSaveRequest=APP_CAPTURE_SAVE_REQUEST;AppCapture_Process();
+      before=blocks;AppCapture_Audio(audio,APP_AUDIO_HALF_FRAMES,0,0,0);
+      AppCapture_Log("clap unsupported\n");AppCapture_Trigger();
+      Inject(TRIGGER,lastArm,0,NULL,0,0);Inject(FREEZE,lastArm+1,0,NULL,0,0);
+      assert(state==IDLE && !hold && !appCaptureSaveRequest && blocks==before && !logBytes && !triggered);
+    }
     testPage=APP_PAGE_STANDARD;AppCapture_Process();assert(state==IDLE);
     button=0;AppCapture_Process();tick+=41;AppCapture_Process();
     button=1;AppCapture_Process();tick+=20;button=0;AppCapture_Process();tick+=50;AppCapture_Process();
@@ -136,7 +136,7 @@ int main(int argc,char **argv)
      * not underflow against the newly stamped deadline and raise error 902. */
     button=1;AppCapture_Process();tick+=41;tickAdvance=1;
     pendingSize=0;AppCapture_Process();tickAdvance=0;assert(state==WAIT_INFO && hold);
-    assert(pendingSize && G32(pending+4)==FREEZE); /* request actually leaves A */
+    assert(pendingSize && AppWire_Get32LE(pending+4)==FREEZE); /* request actually leaves A */
     before=transaction;tick+=1000;AppCapture_Process();assert(transaction==before); /* held button: one save */
     tick=deadline+9999U;AppCapture_Process();assert(state==WAIT_INFO);
     tick=deadline+10001U;AppCapture_Process();
@@ -150,9 +150,9 @@ int main(int argc,char **argv)
     tick=deadline+10001U;AppCapture_Process();assert(state==ERROR_STATE && strstr(text,"902"));
   } else {
     hold=0;Inject(FREEZE,5,0,NULL,0,1);assert(!hold); /* corrupt frame */
-    Inject(FREEZE,5,0,NULL,0,0);assert(hold && G32(pending+4)==INFO);
-    Inject(READ,4,0,NULL,0,0);assert(G32(pending+4)==INFO); /* wrong transaction */
-    Inject(READ,5,0,NULL,0,0);assert(G32(pending+4)==DATA && !memcmp(pending+PREFIX,HEADER,CHUNK));
+    Inject(FREEZE,5,0,NULL,0,0);assert(hold && AppWire_Get32LE(pending+4)==INFO);
+    Inject(READ,4,0,NULL,0,0);assert(AppWire_Get32LE(pending+4)==INFO); /* wrong transaction */
+    Inject(READ,5,0,NULL,0,0);assert(AppWire_Get32LE(pending+4)==DATA && !memcmp(pending+PREFIX,HEADER,CHUNK));
     Inject(RESET,5,0,NULL,0,0);assert(resets==1 && hold);
     Inject(RESET,5,0,NULL,0,0);assert(resets==1 && hold);
     Inject(ARM,5,0,NULL,0,0);assert(!hold && !frozen);
@@ -160,6 +160,11 @@ int main(int argc,char **argv)
     Inject(FREEZE,5,0,NULL,0,0);assert(!hold); /* late freeze */
     Inject(FREEZE,4,0,NULL,0,0);assert(!hold); /* freeze from an older retry */
     Inject(TRIGGER,0,0,NULL,0,0);assert(!triggered);
+    testPage=APP_PAGE_CLAP;AppCapture_Process();pendingSize=0;
+    Inject(TRIGGER,lastArm,0,NULL,0,0);Inject(FREEZE,6,0,NULL,0,0);
+    assert(!hold && !triggered && !pendingSize);
+    testPage=APP_PAGE_STANDARD;AppCapture_Process();
+    Inject(FREEZE,6,0,NULL,0,0);assert(hold);
   }
   puts("Capture ring, transaction, failure retention, replay tests passed.");return 0;
 }

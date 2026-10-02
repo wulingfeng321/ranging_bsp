@@ -1,6 +1,8 @@
 #ifndef TEST_SCOPE_LCD_H
 #define TEST_SCOPE_LCD_H
-#include "../../../../../Utilities/Fonts/fonts.h"
+#include "../../../Drivers/Fonts/fonts.h"
+uint32_t HAL_GetTick(void);
+#define __DSB() ((void)0)
 typedef struct { struct { uint32_t FBStartAdress; } LayerCfg[1]; } LTDC_HandleTypeDef;
 typedef struct { uint32_t SRCR; } TestLtdc;
 extern TestLtdc testLtdc;

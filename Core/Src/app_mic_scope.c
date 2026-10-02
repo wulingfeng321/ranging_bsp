@@ -4,7 +4,7 @@
 #include "app_range.h"
 #include "app_board_config.h"
 #include "range_dsp.h"
-#include "stm32746g_discovery_audio.h"
+#include "board_audio.h"
 #include "stm32746g_discovery_lcd.h"
 #include "stm32746g_discovery_ts.h"
 #include <stdio.h>
@@ -14,9 +14,6 @@
 
 #define FRAME_A 0xC0000000U
 #define FRAME_B 0xC0080000U
-/* Same non-cacheable DMA region and 16 ms half buffers as the ranging baseline. */
-#define AUDIO_BUFFER ((uint16_t *)0xC0100000U)
-#define DMA_WORDS (APP_AUDIO_HALF_FRAMES * 4U)
 #define BG 0xFF101820U
 #define PANEL 0xFF20313EU
 #define MUTED 0xFFA7BBC9U
@@ -25,19 +22,26 @@
 #define WARN 0xFFFFD17AU
 #define BAD 0xFFFF8888U
 
-extern SAI_HandleTypeDef haudio_in_sai;
 extern LTDC_HandleTypeDef hLtdcHandler;
-volatile uint32_t micDmaBlocks, micErrors;
-static uint32_t lastDraw, lastReceived, seenBlocks, backBuffer=FRAME_B;
+static uint32_t lastDraw, backBuffer=FRAME_B;
 static uint32_t distanceMm, resultTick, touchTick, touchSince;
 static int32_t drawnTemperature=APP_TEMPERATURE_DECI_C;
 static uint64_t presentAt;
-static uint8_t framePending, started, touchReady, touchHeld, dirty=1, diagnostics;
+static uint8_t framePending, touchReady, touchHeld, dirty=1, diagnostics;
 static int touchCandidate;
 
 static AppPage drawnPage=APP_PAGE_POSITION;
 static MicScope_RangeState rangeState=MIC_SCOPE_RANGE_WAITING;
-static const char *audioStatus="MIC STARTING";
+static const char *AudioStatusText(void)
+{
+  switch(BoardAudio_GetState()) {
+    case BOARD_AUDIO_RUNNING:return "MIC RUNNING";
+    case BOARD_AUDIO_INIT_ERROR:return "MIC INIT ERROR";
+    case BOARD_AUDIO_START_ERROR:return "MIC START ERROR";
+    case BOARD_AUDIO_DATA_ERROR:return "MIC DATA ERROR";
+    default:return "MIC STARTING";
+  }
+}
 static sFONT *uiFont;
 static uint32_t textBackground=BG;
 
@@ -112,7 +116,7 @@ static void Footer(void)
   Font(&Font12);
   Text(12,241,AppCapture_Text(),AppCapture_Busy() ? WARN : ACCENT);
   Text(270,241,"SAVE: A BOARD USER KEY",MUTED);
-  Text(12,257,AppCapture_Detail()[0] ? AppCapture_Detail() : audioStatus,
+  Text(12,257,AppCapture_Detail()[0] ? AppCapture_Detail() : AudioStatusText(),
     AppCapture_Detail()[0] ? WARN : MUTED);
 }
 static void Standard(uint32_t now)
@@ -267,10 +271,10 @@ static void WaveLive(void)
   uint64_t ps=AppRange_WavePeriodPs();
   uint32_t mhz=ps ? (uint32_t)(1000000000000000ULL/ps) : 0;
   unsigned x; int32_t lo=32767,hi=-32768,sum=0,mean,scale=512,previous=160;
-  int fresh=started && AppRange_WaveRead(presentAt,candidate,456);
+  int fresh=(BoardAudio_GetState()==BOARD_AUDIO_RUNNING) && AppRange_WaveRead(presentAt,candidate,456);
   int have;
   if(fresh) { memcpy(trace,candidate,sizeof(trace)); lastGood=HAL_GetTick(); valid=1; }
-  if(!started || HAL_GetTick()-lastGood>200U) valid=0;
+  if(!(BoardAudio_GetState()==BOARD_AUDIO_RUNNING) || HAL_GetTick()-lastGood>200U) valid=0;
   have=valid;
   char line[80];
   Common(); Font(&Font12);
@@ -303,10 +307,10 @@ static void WaveLive(void)
       lo<=-32700 || hi>=32700 ? "CLIPPING" : (hi-lo<256 ? "LOW SIGNAL" : "PCM"));
     Text(12,213,line,hi-lo<256 ? WARN : MUTED);
   } else Text(12,153,AppCapture_Busy() ? "SAVING / WAVE PAUSED" :
-    (!started ? "MIC ERROR" : "WAITING FOR AUDIO TIME / FRAME"),WARN);
+    (!(BoardAudio_GetState()==BOARD_AUDIO_RUNNING) ? "MIC ERROR" : "WAITING FOR AUDIO TIME / FRAME"),WARN);
   Button(338,211,130,26,"RELOCK TONE",AppRange_SettingsReady() && !AppCapture_Busy());
   Text(12,241,"LIVE VIEW / 20Hz TARGET / 10ms WINDOW",MUTED);
-  Text(12,257,audioStatus,MUTED);
+  Text(12,257,AudioStatusText(),MUTED);
 }
 
 static void PositionLine(int x0,int y0,int x1,int y1,uint32_t color)
@@ -327,7 +331,6 @@ static void PositionPage(uint32_t now)
   int valid=appPositionStatus.valid && appRangeStatus.locked && AppRange_SettingsReady() &&
             now-appPositionStatus.updatedMs<=1500U;
   Common(); Font(&Font12);
-  if(APP_AUDIO_SAMPLE_RATE!=48000U) { Text(12,100,"POSITION REQUIRES 48kHz FIRMWARE",WARN); return; }
   if(APP_BOARD_ROLE==APP_BOARD_A) {
     Text(12,76,"A LEFT / B RIGHT / KEEP STILL",ACCENT);
     Button(340,74,128,26,"CAL FRONT 50cm",AppRange_SettingsReady());
@@ -452,33 +455,17 @@ static void Touch(uint32_t now)
   else if(hit==9) { (void)AppRange_WaveRelock(); dirty=1; }
   else { diagnostics=(uint8_t)(hit==7); dirty=1; }
 }
-static void StoreHalf(uint32_t offset)
-{
-  AppRange_Audio((const volatile int16_t *)AUDIO_BUFFER+offset,APP_AUDIO_HALF_FRAMES);
-  ++micDmaBlocks;
-}
-void BSP_AUDIO_IN_HalfTransfer_CallBack(void) { StoreHalf(0); }
-void BSP_AUDIO_IN_TransferComplete_CallBack(void) { StoreHalf(APP_AUDIO_HALF_FRAMES*2U); }
-void BSP_AUDIO_IN_Error_CallBack(void) { ++micErrors; AppRange_AudioError(); }
 void MicScope_Init(void)
 {
   touchReady=BSP_TS_Init(480,272)==TS_OK;
   Draw(HAL_GetTick(),AppRange_Page());
-  if(BSP_AUDIO_IN_Init(APP_AUDIO_SAMPLE_RATE,16,2)!=AUDIO_OK) { audioStatus="MIC INIT ERROR"; return; }
-  HAL_NVIC_DisableIRQ(AUDIO_IN_INT_IRQ);
-  if(BSP_AUDIO_IN_Record(AUDIO_BUFFER,DMA_WORDS)!=AUDIO_OK ||
-    HAL_SAI_GetState(&haudio_in_sai)!=HAL_SAI_STATE_BUSY_RX) { audioStatus="MIC START ERROR"; return; }
-  lastReceived=HAL_GetTick(); started=1; audioStatus="MIC RUNNING";
+
 }
 void MicScope_Process(void)
 {
   uint32_t now=HAL_GetTick(),refresh;
   uint64_t master=0,period;
   int synced; AppPage page;
-  if(started && seenBlocks!=micDmaBlocks) { seenBlocks=micDmaBlocks; lastReceived=now; }
-  if(started && (micErrors || haudio_in_sai.ErrorCode || now-lastReceived>1000U)) {
-    audioStatus="MIC DATA ERROR"; AppRange_AudioError(); started=0;
-  }
   Touch(now); page=AppRange_Page();
   if(drawnTemperature!=AppRange_Temperature()) {
     drawnTemperature=AppRange_Temperature(); dirty=1;
