@@ -5,6 +5,7 @@
 #include "app_board_config.h"
 #include "range_dsp.h"
 #include "board_audio.h"
+#include "board_memory.h"
 #include "stm32746g_discovery_lcd.h"
 #include "stm32746g_discovery_ts.h"
 #include <stdio.h>
@@ -12,8 +13,8 @@
 #include <string.h>
 #include <math.h>
 
-#define FRAME_A 0xC0000000U
-#define FRAME_B 0xC0080000U
+#define FRAME_A BOARD_LCD_FRAME_A
+#define FRAME_B BOARD_LCD_FRAME_B
 #define BG 0xFF101820U
 #define PANEL 0xFF20313EU
 #define MUTED 0xFFA7BBC9U

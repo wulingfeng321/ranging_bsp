@@ -28,7 +28,7 @@ static void RunAngle(int deg)
       pcm[2*i+k]=(int16_t)(18000*Position_Tone(t)+(int)((rng>>16)%241)-120);
     }
     clockNs=(uint64_t)((10000000000.0+(begin+APP_AUDIO_HALF_FRAMES)*samplePeriod+syncModel.offset)/(1-syncModel.slope));
-    AppRange_Audio(pcm,APP_AUDIO_HALF_FRAMES);WaveObserve();
+    AppRange_Audio(pcm,APP_AUDIO_HALF_FRAMES);ObservePageAudioTime();
     /* One consumer slice per DMA, plus noise ABOVE the energy gate. */
     PositionProcess();
     if(positionEventId && positionEventId!=last) {
@@ -65,7 +65,7 @@ static void RunQuietMinute(void)
       pcm[i]=(int16_t)((int)((rng>>16)%1001)-500+1000); /* noisy room + DC */
     }
     clockNs+=16000000ULL;
-    AppRange_Audio(pcm,APP_AUDIO_HALF_FRAMES);WaveObserve();PositionProcess();
+    AppRange_Audio(pcm,APP_AUDIO_HALF_FRAMES);ObservePageAudioTime();PositionProcess();
   }
   assert(!appPositionStatus.events && !appPositionStatus.backlogResets);
   puts("PASS: 60 simulated seconds of above-gate noise, zero events/backlog resets");
@@ -158,7 +158,7 @@ int main(void)
   assert(appPositionStatus.calibrationCount==3 && positionCalSum[0]==12345);
   assert(positionCursor==audioCount/2);
   /* Warm-up/real capture gap preserves calibration intent, restarting samples. */
-  ++audioEpoch;++audioBlocks;audioAnchor=clockNs;WaveObserve();
+  ++audioEpoch;++audioBlocks;audioAnchor=clockNs;ObservePageAudioTime();
   assert(appPositionStatus.calibration==1 && appPositionStatus.calibrationCount==0);
   assert(!audioTime.ready);
   /* Even with no settings ACK and a large backlog, the waiting UI is admitted. */

@@ -1,10 +1,11 @@
 #include "board_audio.h"
+#include "board_memory.h"
 #include "app_board_config.h"
 #include "stm32746g_discovery_audio.h"
 
 /* Preserve the baseline non-cacheable SDRAM address and 16 ms DMA halves. */
-#define AUDIO_BUFFER ((uint16_t *)0xC0100000U)
-#define DMA_WORDS (APP_AUDIO_HALF_FRAMES * 4U)
+#define AUDIO_BUFFER ((uint16_t *)BOARD_AUDIO_DMA_BASE)
+#define DMA_WORDS BOARD_AUDIO_DMA_WORDS
 extern SAI_HandleTypeDef haudio_in_sai;
 static volatile uint32_t receivedBlocks,dmaErrors;
 static uint32_t seenBlocks,lastReceived;

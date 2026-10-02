@@ -15,7 +15,7 @@ static void Detect(double delay,int amplitude)
   audioCount=audioAnchor=audioBlocks=0;++audioEpoch;RangeAudioTime_Reset(&audioTime);
   uiPage=APP_PAGE_CLAP;uiKnown=1;uiAckRevision=uiRevision;appRangeStatus.locked=1;
   syncModel.offset=APP_BOARD_ROLE==APP_BOARD_B ? 700000000:0;
-  syncModel.slope=APP_BOARD_ROLE==APP_BOARD_B ? .00005:0;syncModel.origin=0;ClapReset();waveSeenEpoch=audioEpoch;waveLastBlock=UINT32_MAX;
+  syncModel.slope=APP_BOARD_ROLE==APP_BOARD_B ? .00005:0;syncModel.origin=0;ClapReset();observedAudioEpoch=audioEpoch;observedAudioBlock=UINT32_MAX;
   for(block=0;block<100;++block) {
     uint64_t base=audioCount;
     for(i=0;i<APP_AUDIO_HALF_FRAMES;++i) {
@@ -24,7 +24,7 @@ static void Detect(double delay,int amplitude)
       pcm[2*i]=pcm[2*i+1]=(int16_t)(amplitude*(Pulse(t)+.7*Pulse(t-.035))+(int)((rng>>16)%81)-40);
     }
     clockNs=(uint64_t)((1e10+(base+APP_AUDIO_HALF_FRAMES)*period+syncModel.offset)/(1-syncModel.slope));
-    AppRange_Audio(pcm,APP_AUDIO_HALF_FRAMES);WaveObserve();ClapProcess();
+    AppRange_Audio(pcm,APP_AUDIO_HALF_FRAMES);ObservePageAudioTime();ClapProcess();
   }
   if(APP_BOARD_ROLE==APP_BOARD_B) { ClapNetwork(HAL_GetTick());assert(sent[5]==CLAP_EVENT); }
   assert(appClapStatus.events==1 && appClapStatus.drops==0);

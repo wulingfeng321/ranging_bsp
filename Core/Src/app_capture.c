@@ -1,4 +1,5 @@
 #include "app_wire.h"
+#include "board_memory.h"
 /* Round recorder. Dedicated non-cacheable SDRAM, independent of DSP/LCD.
  * On-card RNG1 = 4096-byte NUL-padded JSON + stereo PCM + anchors + CSV log.
  * All numeric binary fields little endian. No native C structs go on the wire.
@@ -21,14 +22,14 @@
 #include <string.h>
 #include <stdarg.h>
 
-#define BLOCKS 1000U
+#define BLOCKS BOARD_CAPTURE_BLOCKS
 #define FRAMES (BLOCKS * APP_AUDIO_HALF_FRAMES)
-#define PCM ((int16_t *)0xC0200000U)
-#define ANCHORS ((uint8_t *)0xC0520000U)
-#define LOG ((char *)0xC0530000U)
-#define HEADER ((char *)0xC0550000U)
-#define LOG_SIZE 131072U
-#define HEADER_SIZE 4096U
+#define PCM ((int16_t *)BOARD_CAPTURE_PCM_BASE)
+#define ANCHORS ((uint8_t *)BOARD_CAPTURE_ANCHORS_BASE)
+#define LOG ((char *)BOARD_CAPTURE_LOG_BASE)
+#define HEADER ((char *)BOARD_CAPTURE_HEADER_BASE)
+#define LOG_SIZE BOARD_CAPTURE_LOG_BYTES
+#define HEADER_SIZE BOARD_CAPTURE_HEADER_BYTES
 #define CHUNK 1024U
 #define PORT 5002U
 #define PREFIX 40U
@@ -101,7 +102,7 @@ void AppCapture_Audio(const volatile int16_t *pcm,uint32_t frames,
   if(!captureEnabled || frozen || frames!=APP_AUDIO_HALF_FRAMES) return;
   index=blocks%BLOCKS;
   for(i=0;i<frames*2U;++i) PCM[index*APP_AUDIO_HALF_FRAMES*2U+i]=pcm[i];
-  anchor=ANCHORS+index*24U;
+  anchor=ANCHORS+index*BOARD_CAPTURE_ANCHOR_BYTES;
   AppWire_Put64LE(anchor,count);AppWire_Put64LE(anchor+8,localNs);AppWire_Put32LE(anchor+16,epoch);AppWire_Put32LE(anchor+20,frames);
   ++blocks;if(validBlocks<BLOCKS) ++validBlocks;
   stop=endBlock;
@@ -164,7 +165,7 @@ static void Seal(void)
     (unsigned long long)local,(unsigned long long)master,locked,(unsigned long)appRangeStatus.syncErrorNs,
     (unsigned long)appRangeStatus.samplePeriodPs,(unsigned long long)AppNet_LocalSession(),
     (unsigned long long)AppNet_PeerSession());
-  totalBytes=HEADER_SIZE+savedBlocks*(APP_AUDIO_HALF_FRAMES*4U+24U)+logBytes;
+  totalBytes=HEADER_SIZE+savedBlocks*(APP_AUDIO_HALF_FRAMES*4U+BOARD_CAPTURE_ANCHOR_BYTES)+logBytes;
 }
 
 /* Read the frozen ring as a chronological file, including wrap boundaries. */
@@ -181,11 +182,11 @@ static uint32_t ReadLocal(uint32_t pos,uint8_t *out,uint32_t size)
       physical=(firstBlock*APP_AUDIO_HALF_FRAMES*4U+pos-HEADER_SIZE)%(FRAMES*4U);
       source=(const uint8_t *)PCM+physical;
       left=FRAMES*4U-physical;if(left>HEADER_SIZE+pcmSize-pos) left=HEADER_SIZE+pcmSize-pos;
-    } else if(pos<HEADER_SIZE+pcmSize+savedBlocks*24U) {
-      physical=(firstBlock*24U+pos-HEADER_SIZE-pcmSize)%(BLOCKS*24U);
-      source=ANCHORS+physical;left=BLOCKS*24U-physical;
-      if(left>HEADER_SIZE+pcmSize+savedBlocks*24U-pos) left=HEADER_SIZE+pcmSize+savedBlocks*24U-pos;
-    } else { source=(const uint8_t *)LOG+pos-HEADER_SIZE-pcmSize-savedBlocks*24U;left=totalBytes-pos; }
+    } else if(pos<HEADER_SIZE+pcmSize+savedBlocks*BOARD_CAPTURE_ANCHOR_BYTES) {
+      physical=(firstBlock*BOARD_CAPTURE_ANCHOR_BYTES+pos-HEADER_SIZE-pcmSize)%(BLOCKS*BOARD_CAPTURE_ANCHOR_BYTES);
+      source=ANCHORS+physical;left=BLOCKS*BOARD_CAPTURE_ANCHOR_BYTES-physical;
+      if(left>HEADER_SIZE+pcmSize+savedBlocks*BOARD_CAPTURE_ANCHOR_BYTES-pos) left=HEADER_SIZE+pcmSize+savedBlocks*BOARD_CAPTURE_ANCHOR_BYTES-pos;
+    } else { source=(const uint8_t *)LOG+pos-HEADER_SIZE-pcmSize-savedBlocks*BOARD_CAPTURE_ANCHOR_BYTES;left=totalBytes-pos; }
     n=left<size?left:size;memcpy(out+result,source,n);result+=n;pos+=n;size-=n;
   }
   return result;

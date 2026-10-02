@@ -31,6 +31,7 @@
 #include "stm32746g_discovery_lcd.h"
 #include "app_mic_scope.h"
 #include "board_audio.h"
+#include "board_memory.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -74,6 +75,8 @@ void BSP_LCD_ClockConfig(LTDC_HandleTypeDef *handle, void *params)
   (void)params;
 }
 
+typedef char BoardLcdBaseMatchesBsp[(LCD_FB_START_ADDRESS == BOARD_LCD_FRAME_A) ? 1 : -1];
+
 static void LCD_FramebufferMPU_Config(void)
 {
   MPU_Region_InitTypeDef region = {0};
@@ -82,7 +85,7 @@ static void LCD_FramebufferMPU_Config(void)
   HAL_MPU_Disable();
   region.Enable = MPU_REGION_ENABLE;
   region.Number = MPU_REGION_NUMBER0;
-  region.BaseAddress = LCD_FB_START_ADDRESS;
+  region.BaseAddress = BOARD_SDRAM_BASE;
   region.Size = MPU_REGION_SIZE_8MB;
   region.SubRegionDisable = 0;
   region.TypeExtField = MPU_TEX_LEVEL1;
@@ -131,7 +134,7 @@ static void LCD_Grid_Init(void)
     Error_Handler();
   }
   BSP_LCD_DisplayOff();
-  BSP_LCD_LayerDefaultInit(LCD_GRID_LAYER, LCD_FB_START_ADDRESS);
+  BSP_LCD_LayerDefaultInit(LCD_GRID_LAYER, BOARD_LCD_FRAME_A);
   BSP_LCD_SelectLayer(LCD_GRID_LAYER);
   BSP_LCD_Clear(LCD_COLOR_BLACK);
   LCD_DrawLowerHalfGrid();

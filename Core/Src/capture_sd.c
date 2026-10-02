@@ -6,12 +6,13 @@
 #include "bsp_driver_sd.h"
 #include "sdmmc.h"
 #include "capture_sd.h"
+#include "board_memory.h"
 #include <string.h>
 #include <stdio.h>
 /* SDRAM is DMA-accessible and non-cacheable in main.c. This 512-byte region
  * starts after the recorder's 4096-byte header; no cache-line sharing. */
 #ifndef CAPTURE_SD_BUFFER
-#define CAPTURE_SD_BUFFER ((uint32_t *)0xC0551000U)
+#define CAPTURE_SD_BUFFER ((uint32_t *)BOARD_SD_BUFFER_BASE)
 #endif
 #define sectorBuffer CAPTURE_SD_BUFFER
 static DMA_HandleTypeDef rxDma,txDma;
