@@ -1,6 +1,6 @@
 # 双开发板声学测距系统使用说明书
 
-更新日期：2026-09-30。适用于当前四选项卡触摸UI及48 kHz、LEGACY/JOINT2固件。本文按准备与页面导航、标准音频测距、击掌测距、波形显示、声源定位五个板块组织；四个页面分别说明操作流程和参数含义。工程概况见[README](README.md)，开发与验证记录见[commit_logs](commit_logs/)。
+更新日期：2026-10-02。适用于当前四选项卡触摸UI及48 kHz、LEGACY/JOINT2固件。本文按准备与页面导航、标准音频测距、击掌测距、波形显示、声源定位五个板块组织；四个页面分别说明操作流程和参数含义。工程概况见[README](README.md)，开发与验证记录见[commit_logs](commit_logs/)。
 
 **目录**
 
@@ -34,6 +34,8 @@ if ($LASTEXITCODE -ne 0) { throw 'A/B build failed' }
 ```
 
 脚本依次生成A/B角色配置并编译，无需手动改头文件，也没有单独的`-Board`选项。保留`-JointPeaks`才能得到本文使用的联合候选配置；如IAR安装路径不同，在命令末尾添加`-IarBuild '实际路径/IarBuild.exe'`。
+
+脚本使用全量构建，统一工程及文件/组级覆盖中的角色、采样率和方案宏，并检查每条实际C编译命令。确认输出包含两次编译成功及`verified ... compiler commands`；任一模块参数不一致会报错并停止。完整日志位于`EWARM/ranging_legacy_joint_A_48000/List/build.log`和`EWARM/ranging_legacy_joint_B_48000/List/build.log`。
 
 确认两次构建均成功后，检查`EWARM/ranging_bsp/Exe/`中的产物：
 

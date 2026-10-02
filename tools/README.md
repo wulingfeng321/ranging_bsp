@@ -1,6 +1,6 @@
 # 工具目录
 
-更新日期：2026-09-30。
+更新日期：2026-10-02。
 
 本目录收录固件构建、保存数据解码、音频生成及主机测试工具。下列路径均相对于本目录；示例命令在工程根目录执行。
 
@@ -8,7 +8,7 @@
 
 | 脚本 | 大致作用 |
 | --- | --- |
-| [build_range_profiles.ps1](build_range_profiles.ps1) | 调用IAR，按采样率、LEGACY/WIDE方案及JointPeaks选项分别构建A/B固件，输出OUT/HEX；清理临时角色工程，不执行烧录 |
+| [build_range_profiles.ps1](build_range_profiles.ps1) | 调用IAR，按采样率、LEGACY/WIDE方案及JointPeaks选项分别全量构建A/B固件，统一工程及文件级宏并核对实际编译命令，输出OUT/HEX和构建日志；清理临时角色工程，不执行烧录 |
 | [decode_capture.py](decode_capture.py) | 检查SD保存轮的完成标记、文件大小及校验值，解码A/B的RNG文件，导出双声道WAV、元数据JSON、时间锚点与日志CSV；保留原始文件 |
 
 ```powershell
@@ -17,6 +17,8 @@ python tools/decode_capture.py 'E:/captures/R000001'
 ```
 
 构建需要IAR EWARM，默认路径为8.2安装目录，可通过`-IarBuild`指定。解码使用Python 3标准库，默认输出到保存轮内的`decoded/`，也可通过`--output`指定目录。当前解码面向标准音频测距；击掌保存及日志解码不再继续开发。编译/烧录和完整解码操作见[用户手册](../USER_MANUAL.md)。
+
+构建脚本将板角色、采样率、音频方案及联合候选开关写入所有现有的IAR编译宏列表，包含文件/组级覆盖，避免同一固件的不同模块采用不同板角色。脚本执行全量构建，并逐条检查实际C编译命令；完整日志保存为`EWARM/<临时角色工程名>/List/build.log`，核对失败时停止并报错。原始工程文件和`app_board_config.h`不被脚本修改。
 
 ## 2. 音频生成与模板导出
 
