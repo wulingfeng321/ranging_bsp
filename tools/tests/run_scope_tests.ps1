@@ -24,28 +24,32 @@ $commands += "`"$out/wave-module.exe`""
 $commands += 'if not "%errorlevel%"=="0" exit /b 1'
 foreach ($role in 1,2) {
     $common = "/nologo /utf-8 /O2 /DAPP_BOARD_ROLE=$role /DAPP_AUDIO_SAMPLE_RATE=48000 /Fo`"$out/`""
+    $commands += "cl $common /ICore/Inc tools/tests/test_clap_module.c Core/Src/app_clap.c /Fe`"$out/clap-module$role.exe`""
+    $commands += 'if not "%errorlevel%"=="0" exit /b 1'
+    $commands += "`"$out/clap-module$role.exe`""
+    $commands += 'if not "%errorlevel%"=="0" exit /b 1'
     # Cortex-M's fixed 32-bit SDRAM addresses are not dereferenced by this host test.
     $commands += "cl $common /wd4312 /Itools/tests/scope_stubs /ICore/Inc tools/tests/test_scope.c /Fe`"$out/scope$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
     $commands += "`"$out/scope$role.exe`" `"$out/scope$role`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
-    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_clap.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_wave.c /Fe`"$out/clap$role.exe`""
+    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_clap.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_wave.c Core/Src/app_clap.c /Fe`"$out/clap$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
     $commands += "`"$out/clap$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
-    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_position.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_wave.c /Fe`"$out/position$role.exe`""
+    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_position.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_wave.c Core/Src/app_clap.c /Fe`"$out/position$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
     $commands += "`"$out/position$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
-    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_wave.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_wave.c /Fe`"$out/wave$role.exe`""
+    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_wave.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_wave.c Core/Src/app_clap.c /Fe`"$out/wave$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
     $commands += "`"$out/wave$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
-    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_ui_control.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_wave.c /Fe`"$out/ui$role.exe`""
+    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_ui_control.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_wave.c Core/Src/app_clap.c /Fe`"$out/ui$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
     $commands += "`"$out/ui$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
-    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_master_time.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_wave.c /Fe`"$out/master$role.exe`""
+    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_master_time.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_wave.c Core/Src/app_clap.c /Fe`"$out/master$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
     $commands += "`"$out/master$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'

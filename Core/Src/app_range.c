@@ -10,7 +10,7 @@
 #include "range_audio_time.h"
 #include "app_wave.h"
 #include "position_dsp.h"
-#include "clap_dsp.h"
+#include "app_clap.h"
 #if APP_RANGE_JOINT_PEAKS
 #include "range_peak_pair.h"
 #endif
@@ -126,42 +126,11 @@ static void PositionRestartAudio(unsigned gap)
 }
 static void PositionProcess(void);
 static void PositionNetwork(uint32_t now);
-AppClapStatus appClapStatus;
-static ClapDetector clapDetector;
-static uint64_t clapCursor,clapLocal,clapRemote;
-static uint32_t clapEpoch,clapLocalQ,clapRemoteQ,clapEventId,clapRemoteId;
-static uint32_t clapResultId,clapReceivedId,clapEventMs,clapRemoteMs,clapSendMs,clapResultMs;
-static uint8_t clapHaveLocal,clapHaveRemote;
+static void AudioSnapshot(uint64_t *count,uint32_t *epoch);
 static void ClapReset(void)
 {
-  uint32_t mask=__get_PRIMASK();
-  __disable_irq();clapCursor=audioCount;clapEpoch=audioEpoch;__set_PRIMASK(mask);
-  Clap_Reset(&clapDetector);memset(&appClapStatus,0,sizeof(appClapStatus));
-  clapHaveLocal=clapHaveRemote=0;clapEventId=clapRemoteId=clapResultId=clapReceivedId=0;
-}
-static void ClapRecord(uint32_t cm)
-{
-  unsigned i;
-  for(i=5;i>0;--i) appClapStatus.recentCm[i]=appClapStatus.recentCm[i-1];
-  appClapStatus.recentCm[0]=(uint16_t)cm;
-  if(appClapStatus.recentCount<6) ++appClapStatus.recentCount;
-}
-static uint64_t ClapHistoryPack(void)
-{
-  unsigned i;uint64_t bits=(uint64_t)appClapStatus.recentCount<<54;
-  for(i=0;i<appClapStatus.recentCount;++i) bits|=(uint64_t)appClapStatus.recentCm[i]<<(i*9);
-  return bits;
-}
-/* Snapshot, not incremental replication: a lost result cannot desync history. */
-static int ClapHistoryValid(uint64_t bits,uint32_t latest)
-{
-  unsigned i,n=(unsigned)(bits>>54);
-  if(!n || n>6 || (bits&511U)!=latest) return 0;
-  for(i=0;i<6;++i) {
-    unsigned cm=(unsigned)((bits>>(i*9))&511U);
-    if((i<n && cm>300) || (i>=n && cm)) return 0;
-  }
-  return 1;
+  uint64_t count;uint32_t epoch;
+  AudioSnapshot(&count,&epoch);AppClap_Reset(count,epoch);
 }
 static void ClapProcess(void);
 static void ClapNetwork(uint32_t now);
@@ -453,19 +422,12 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
        !AppRange_MasterTime(&current) || AppWire_Get32BE(bytes+72)!=uiRevision ||
        epoch!=(APP_BOARD_ROLE==APP_BOARD_A ? peerEpoch : syncEpoch)) goto reject;
     if(type==CLAP_EVENT && APP_BOARD_ROLE==APP_BOARD_A) {
-      if(!x || x>current || current-x>1000000000ULL || y>1000) goto reject;
-      if(clapRemoteId && (id==clapRemoteId || id-clapRemoteId>=0x80000000UL)) return;
-      clapRemoteId=id;clapRemote=x;clapRemoteQ=(uint32_t)y;
-      clapRemoteMs=now;clapHaveRemote=1;++appClapStatus.received;return;
+      if(!AppClap_ReceiveEvent(id,x,y,current,now)) goto reject;
+      return;
     }
     if(type==CLAP_RESULT && APP_BOARD_ROLE==APP_BOARD_B) {
-      if(x>300 || y>2 || z>1000 || !ClapHistoryValid(AppWire_Get64BE(bytes+56),(uint32_t)x)) goto reject;
-      if(clapReceivedId && (id==clapReceivedId || id-clapReceivedId>=0x80000000UL)) return;
-      clapReceivedId=id;++appClapStatus.received;appClapStatus.distanceCm=(uint32_t)x;
-      appClapStatus.recentCount=(uint8_t)(AppWire_Get64BE(bytes+56)>>54);
-      for(i=0;i<6;++i) appClapStatus.recentCm[i]=(uint16_t)((AppWire_Get64BE(bytes+56)>>(9*i))&511U);
-      appClapStatus.direction=y==1 ? 1 : (y==2 ? -1:0);
-      appClapStatus.quality=(uint32_t)z;appClapStatus.updatedMs=now;appClapStatus.valid=1;return;
+      if(!AppClap_ReceiveResult(id,x,y,z,AppWire_Get64BE(bytes+56),now)) goto reject;
+      return;
     }
     goto reject;
   }
@@ -829,9 +791,9 @@ static void AudioSnapshot(uint64_t *count,uint32_t *epoch)
   uint32_t mask=__get_PRIMASK();
   __DMB();__disable_irq();*count=audioCount;*epoch=audioEpoch;__set_PRIMASK(mask);
 }
-static AppWaveAudio WaveAudioView(uint64_t count,uint32_t epoch)
+static AppAudioView AudioView(uint64_t count,uint32_t epoch)
 {
-  AppWaveAudio audio;
+  AppAudioView audio;
   audio.ring=audioRing;audio.ringSamples=AUDIO_RING;
   audio.count=count;audio.epoch=epoch;audio.snapshot=AudioSnapshot;
   return audio;
@@ -855,7 +817,8 @@ static void ObservePageAudioTime(void)
       appPositionStatus.calibrationCount=0;
       if(appPositionStatus.calibration!=1) appPositionStatus.calibration=0;
     } else if(uiPage==APP_PAGE_CLAP) {
-      uint32_t drops=appClapStatus.drops+1;ClapReset();appClapStatus.drops=drops;
+      uint64_t newest;uint32_t currentEpoch;
+      AudioSnapshot(&newest,&currentEpoch);AppClap_Restart(newest,currentEpoch);
     } else ResetPageMeasurements();
     RangeAudioTime_Reset(&audioTime);
     appRangeStatus.audioTimeReady=0;
@@ -869,7 +832,7 @@ static void ObservePageAudioTime(void)
   if(uiPage!=APP_PAGE_WAVE || APP_BOARD_ROLE!=APP_BOARD_A || AppWave_GetClock()->periodPs ||
      !appRangeStatus.locked || !AppRange_SettingsReady() || !audioTime.ready) return;
   {
-    AppWaveAudio audio=WaveAudioView(count,epoch);
+    AppAudioView audio=AudioView(count,epoch);
     if(AppWave_Calibrate(&audio,anchor,audioTime.periodNs,RangeClock_Now))
       waveSendMs=HAL_GetTick()-250U;
   }
@@ -877,13 +840,13 @@ static void ObservePageAudioTime(void)
 int AppRange_WaveRead(uint64_t presentMasterNs,int16_t *out,unsigned points)
 {
   uint64_t count,masterNow;uint32_t epoch;
-  AppWaveAudio audio;AppWaveTime time;
+  AppAudioView audio;AppAudioTime time;
   if(!out || points<2 || points>480 || uiPage!=APP_PAGE_WAVE ||
      !audioTime.ready || AppCapture_Busy()) return 0;
   if(presentMasterNs && !AppRange_MasterTime(&masterNow)) return 0;
   AudioSnapshot(&count,&epoch);
   if(epoch!=observedAudioEpoch || !audioTime.count) return 0;
-  audio=WaveAudioView(count,epoch);
+  audio=AudioView(count,epoch);
   time.anchorSample=audioTime.sample[(audioTime.next+31U)%32U];
   time.anchorNs=audioTime.anchorNs;time.periodNs=audioTime.periodNs;
   if(presentMasterNs && APP_BOARD_ROLE==APP_BOARD_B) {
@@ -894,76 +857,32 @@ int AppRange_WaveRead(uint64_t presentMasterNs,int16_t *out,unsigned points)
                       presentMasterNs!=0,out,points);
 }
 
+static uint32_t NextSequence(void) { return ++sequence; }
 static void ClapProcess(void)
 {
-  uint64_t count,start=RangeClock_Now(),anchorSample;uint32_t mask,epoch,n;
+  uint64_t count;uint32_t epoch;
+  AppAudioView audio;AppAudioTime time;AppClapOnset event;
   if(!AppRange_SettingsReady() || !appRangeStatus.locked || !audioTime.ready) {
-    appClapStatus.ready=0;return;
+    AppClap_PauseDetection();return;
   }
-  mask=__get_PRIMASK();__disable_irq();count=audioCount;epoch=audioEpoch;__set_PRIMASK(mask);
-  if(epoch!=clapEpoch || count-clapCursor>AUDIO_RING-APP_AUDIO_HALF_FRAMES) {
-    uint32_t drops=appClapStatus.drops+1;ClapReset();appClapStatus.drops=drops;return;
+  AudioSnapshot(&count,&epoch);audio=AudioView(count,epoch);
+  time.anchorSample=audioTime.sample[(audioTime.next+31U)%32U];
+  time.anchorNs=audioTime.anchorNs;time.periodNs=audioTime.periodNs;
+  if(AppClap_Process(&audio,&time,RangeClock_Now,&event)) {
+    double stamp=event.localNs;
+    if(APP_BOARD_ROLE==APP_BOARD_B) stamp=stamp-syncModel.offset-syncModel.slope*(stamp-syncModel.origin);
+    AppClap_PublishLocal((uint64_t)(stamp+0.5),event.quality,NextSequence(),HAL_GetTick());
   }
-  anchorSample=audioTime.sample[(audioTime.next+31U)%32U];
-  for(n=0;n<4096 && clapCursor<count;++n,++clapCursor) {
-    uint64_t onset;uint32_t quality;int found;
-    if(n && !(n&63U) && RangeClock_Now()-start>=1500000ULL) break;
-    found=Clap_Push(&clapDetector,audioRing[(uint32_t)clapCursor&(AUDIO_RING-1U)],clapCursor,&onset,&quality);
-    if(found<0) ++appClapStatus.rejected;
-    if(found>0) {
-      double stamp=audioTime.anchorNs+((double)onset-(double)anchorSample)*audioTime.periodNs;
-      __DMB();mask=__get_PRIMASK();__disable_irq();
-      { uint64_t newest=audioCount;__set_PRIMASK(mask);
-        if(epoch!=audioEpoch || newest-clapCursor>=AUDIO_RING) {
-          uint32_t drops=appClapStatus.drops+1;ClapReset();appClapStatus.drops=drops;return;
-        }
-      }
-      if(APP_BOARD_ROLE==APP_BOARD_B) stamp=stamp-syncModel.offset-syncModel.slope*(stamp-syncModel.origin);
-      clapLocal=(uint64_t)(stamp+0.5);clapLocalQ=quality;clapHaveLocal=1;
-      clapEventId=++sequence;clapEventMs=HAL_GetTick();clapSendMs=clapEventMs-150U;
-      ++appClapStatus.events;appClapStatus.arrivalUs=clapLocal/1000U;
-      ++clapCursor;break;
-    }
-  }
-  appClapStatus.noise=(uint32_t)clapDetector.noise;
-  appClapStatus.ready=(uint8_t)(clapDetector.warm>=APP_AUDIO_SAMPLE_RATE/2U);
 }
 static void ClapNetwork(uint32_t now)
 {
-  if(uiPage!=APP_PAGE_CLAP || !AppRange_SettingsReady() || !appRangeStatus.locked) {
-    appClapStatus.valid=appClapStatus.ready=0;return;
-  }
-  if(appClapStatus.valid && now-appClapStatus.updatedMs>10000U) appClapStatus.valid=0;
-  if(clapHaveLocal && now-clapEventMs>1000U) clapHaveLocal=0;
-  if(clapHaveRemote && now-clapRemoteMs>1000U) clapHaveRemote=0;
-  if(APP_BOARD_ROLE==APP_BOARD_B) {
-    if(clapHaveLocal && now-clapSendMs>=100U) {
-      clapSendMs=now;Send(CLAP_EVENT,clapEventId,syncEpoch,clapLocal,clapLocalQ,0,0,0);
-    }
-  } else {
-    if(clapHaveLocal && clapHaveRemote) {
-      int64_t delta=(int64_t)clapRemote-(int64_t)clapLocal;
-      if(delta>10000000) clapHaveLocal=0;
-      else if(delta< -10000000) clapHaveRemote=0;
-      else {
-        uint64_t magnitude=(uint64_t)(delta<0 ? -delta:delta);
-        float cm=(float)magnitude*(331.3f+0.0606f*temperature)/10000000.0f;
-        clapHaveLocal=clapHaveRemote=0;
-        if(cm>300) { ++appClapStatus.rejected;return; }
-        appClapStatus.distanceCm=(uint32_t)(cm+0.5f);
-        ClapRecord(appClapStatus.distanceCm);
-        appClapStatus.direction=magnitude>100000U+appRangeStatus.syncErrorNs ? (delta>0 ? 1:-1):0;
-        appClapStatus.quality=clapLocalQ<clapRemoteQ ? clapLocalQ:clapRemoteQ;
-        appClapStatus.updatedMs=now;appClapStatus.valid=1;
-        clapResultId=++sequence;clapResultMs=now;clapSendMs=now-150U;
-      }
-    }
-    if(clapResultId && now-clapResultMs<1000U && now-clapSendMs>=100U) {
-      clapSendMs=now;
-      Send(CLAP_RESULT,clapResultId,peerEpoch,appClapStatus.distanceCm,
-           appClapStatus.direction>0 ? 1 : (appClapStatus.direction<0 ? 2:0),appClapStatus.quality,ClapHistoryPack(),0);
-    }
-  }
+  AppClapTx message;
+  if(!AppClap_Tick(now,uiPage==APP_PAGE_CLAP && AppRange_SettingsReady() && appRangeStatus.locked,
+                   temperature,appRangeStatus.syncErrorNs,NextSequence,&message)) return;
+  if(message.kind==APP_CLAP_TX_EVENT)
+    Send(CLAP_EVENT,message.id,syncEpoch,message.arrivalNs,message.quality,0,0,0);
+  else
+    Send(CLAP_RESULT,message.id,peerEpoch,message.distanceCm,message.side,message.quality,message.history,0);
 }
 
 static void PositionProcess(void)

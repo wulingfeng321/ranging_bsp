@@ -2,6 +2,7 @@
 #define main original_test_main
 #include "test_app_range.c"
 #undef main
+#include "clap_dsp.h"
 static double Pulse(double t)
 {
   if(t<0 || t>.09) return 0;
@@ -28,26 +29,29 @@ static void Detect(double delay,int amplitude)
   }
   if(APP_BOARD_ROLE==APP_BOARD_B) { ClapNetwork(HAL_GetTick());assert(sent[5]==CLAP_EVENT); }
   assert(appClapStatus.events==1 && appClapStatus.drops==0);
-  assert(fabs((double)clapLocal-1e10-onset*1e9)<300000); /* <=10.4cm onset budget */
+  assert(fabs((double)(appClapStatus.arrivalUs*1000ULL)-1e10-onset*1e9)<300000); /* <=10.4cm onset budget */
+}
+/* Seed a received snapshot; rolling A-side history is tested independently. */
+static void SeedHistory(uint32_t cm)
+{
+  static uint32_t id=2000;
+  assert(AppClap_ReceiveResult(++id,cm,0,800,(1ULL<<54)|cm,HAL_GetTick()));
 }
 static void CheckHistory(void)
 {
-  uint32_t rev,id;unsigned i;
+  uint32_t rev,id;
   uiPage=APP_PAGE_CLAP;uiKnown=1;uiAckRevision=uiRevision;uiPendingId=0;appRangeStatus.locked=1;
   ClapReset();
-  for(i=1;i<=8;++i) ClapRecord(i*10);
-  assert(appClapStatus.recentCount==6 && appClapStatus.recentCm[0]==80 && appClapStatus.recentCm[5]==30);
-  assert(ClapHistoryValid(ClapHistoryPack(),80));
-  assert(!ClapHistoryValid(7ULL<<54,80));assert(!ClapHistoryValid((1ULL<<54)|400,400));
+  SeedHistory(80);
   rev=uiRevision;
   assert(AppRange_ClearClapStats());assert(!AppRange_SettingsReady());
   if(APP_BOARD_ROLE==APP_BOARD_A) {
-    assert(!appClapStatus.recentCount && !appClapStatus.events && !clapDetector.warm);
+    assert(!appClapStatus.recentCount && !appClapStatus.events && !appClapStatus.ready);
     testRevision=rev;id=appRangeStatus.rejected;
     Inject(CLAP_EVENT,222,7,clockNs-1000000,800,0);assert(appRangeStatus.rejected==id+1);
     testRevision=0;Inject(UI_ACK,uiRevision,0,0,0,0);assert(AppRange_SettingsReady());
-    ClapRecord(100);Inject(UI_REQUEST,999,0,4,0,0);assert(!appClapStatus.recentCount);
-    rev=uiRevision;ClapRecord(110);Inject(UI_REQUEST,999,0,4,0,0);
+    SeedHistory(100);Inject(UI_REQUEST,999,0,4,0,0);assert(!appClapStatus.recentCount);
+    rev=uiRevision;SeedHistory(110);Inject(UI_REQUEST,999,0,4,0,0);
     assert(uiRevision==rev && appClapStatus.recentCount==1);
   } else {
     id=uiPendingId;UiProcess(HAL_GetTick());assert(sent[5]==UI_REQUEST && AppWire_Get64BE(sent+32)==4);
@@ -69,9 +73,9 @@ int main(void)
 {
   unsigned i;uint32_t id;uint64_t onset,reference;uint32_t q;ClapDetector d;
   AppRange_Init();appNetStatus.online=1;AppRange_Process();syncEpoch=peerEpoch=7;
-  Detect(0,8000);reference=clapLocal;
-  Detect(.004,1800);assert(fabs((double)clapLocal-reference-4000000)<500000);
-  Detect(-.004,12000);assert(fabs((double)clapLocal-reference+4000000)<500000);
+  Detect(0,8000);reference=(appClapStatus.arrivalUs*1000ULL);
+  Detect(.004,1800);assert(fabs((double)(appClapStatus.arrivalUs*1000ULL)-reference-4000000)<500000);
+  Detect(-.004,12000);assert(fabs((double)(appClapStatus.arrivalUs*1000ULL)-reference+4000000)<500000);
   Clap_Reset(&d);
   for(i=0;i<APP_AUDIO_SAMPLE_RATE*2;++i) assert(!Clap_Push(&d,(int16_t)(30*sin(i*.7)),i,&onset,&q));
   assert(!Clap_Push(&d,32000,i++,&onset,&q));
@@ -89,19 +93,21 @@ int main(void)
   }
   uiPage=APP_PAGE_CLAP;uiKnown=1;uiAckRevision=uiRevision;appRangeStatus.locked=1;
   /* Audio discontinuity and backlog discard candidate state and relearn noise. */
-  audioTime.ready=1;++audioEpoch;ClapProcess();assert(appClapStatus.drops==1 && !clapDetector.warm);
-  audioCount+=AUDIO_RING;ClapProcess();assert(appClapStatus.drops==2 && clapCursor==audioCount);
+  audioTime.ready=1;++audioEpoch;ClapProcess();assert(appClapStatus.drops==1 && !appClapStatus.ready);
+  audioCount+=AUDIO_RING;ClapProcess();assert(appClapStatus.drops==2 && !appClapStatus.ready);
+  ClapProcess();assert(appClapStatus.drops==2); /* restart caught up to producer */
   id=appRangeStatus.rejected;
   Inject(RESULT,991,7,2000,1,900);assert(appRangeStatus.rejected==id+1);
   if(APP_BOARD_ROLE==APP_BOARD_A) {
     for(i=0;i<2;++i) {
-      clapLocal=clockNs-100000000ULL;clapLocalQ=850;clapHaveLocal=1;clapEventMs=HAL_GetTick();
-      Inject(CLAP_EVENT,100+i,7,clapLocal+(i ? -3000000LL:3000000LL),700,0);
+      uint64_t local=clockNs-100000000ULL;
+      AppClap_PublishLocal(local,850,NextSequence(),HAL_GetTick());
+      Inject(CLAP_EVENT,100+i,7,local+(i ? -3000000LL:3000000LL),700,0);
       ClapNetwork(HAL_GetTick());assert(appClapStatus.valid);
       assert(appClapStatus.distanceCm==104 && appClapStatus.direction==(i ? -1:1));
     }
-    id=appClapStatus.received;Inject(CLAP_EVENT,101,7,clapLocal,700,0);assert(appClapStatus.received==id);
-    Inject(CLAP_EVENT,102,8,clapLocal,700,0);assert(appClapStatus.received==id);
+    id=appClapStatus.received;Inject(CLAP_EVENT,101,7,(appClapStatus.arrivalUs*1000ULL),700,0);assert(appClapStatus.received==id);
+    Inject(CLAP_EVENT,102,8,(appClapStatus.arrivalUs*1000ULL),700,0);assert(appClapStatus.received==id);
   } else {
     testPayloadU=(1ULL<<54)|104;
     Inject(CLAP_RESULT,100,7,104,2,800);
@@ -112,9 +118,9 @@ int main(void)
     assert(appClapStatus.distanceCm==104);testRevision=0;
   }
   clockNs+=11000000000ULL;ClapNetwork(HAL_GetTick());assert(!appClapStatus.valid);
-  ApplyUi(APP_PAGE_STANDARD,250);assert(!appClapStatus.events && !clapEventId);
+  ApplyUi(APP_PAGE_STANDARD,250);assert(!appClapStatus.events && !appClapStatus.valid && !appClapStatus.recentCount);
   id=appClapStatus.received;Inject(CLAP_RESULT,200,7,10,1,800);assert(appClapStatus.received==id);
   CheckHistory();
-  puts("PASS: history snapshot, rolling window and linked clear; clap DMA onset at three levels/delays, echo suppression, silence/spike rejection, direction, transport, expiry and page isolation");
+  puts("PASS: history snapshot and linked clear; clap DMA onset at three levels/delays, echo suppression, silence/spike rejection, direction, transport, expiry and page isolation");
   return 0;
 }

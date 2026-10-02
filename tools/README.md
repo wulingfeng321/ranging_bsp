@@ -42,7 +42,7 @@ python tools/audio/generate.py all --regression
 | 脚本 | 大致作用 |
 | --- | --- |
 | [tests/run_host_tests.ps1](tests/run_host_tests.ps1) | 检查音频工具并生成回归输入，构建48 kHz检测器与A/B状态机，运行时基、联合峰、WIDE及处理量回归 |
-| [tests/run_scope_tests.ps1](tests/run_scope_tests.ps1) | 构建并运行音频板级适配、内存布局编译拒绝、独立波形模块、字节编码、网络、界面、触摸、击掌、定位、波形、公共时基及DSP诊断测试，生成模拟页面图像 |
+| [tests/run_scope_tests.ps1](tests/run_scope_tests.ps1) | 构建并运行音频板级适配、内存布局编译拒绝、独立波形/击掌模块、字节编码、网络、界面、触摸、击掌、定位、波形、公共时基及DSP诊断测试，生成模拟页面图像 |
 | [tests/run_capture_tests.ps1](tests/run_capture_tests.ps1) | 检查SD驱动与A/B保存事务，并调用解码脚本验证模拟保存数据 |
 | [tests/test_audio_tools.py](tests/test_audio_tools.py) | 检查音频格式、时序、模板一致性、自定义参数、异常输入和导入副作用 |
 | [tests/test_48k.py](tests/test_48k.py) | 检查48 kHz检测器的窗口对齐、分数延迟、完整播放及噪声/单音拒绝 |
@@ -53,6 +53,7 @@ python tools/audio/generate.py all --regression
 | [tests/test_board_audio.c](tests/test_board_audio.c) | 音频初始化、DMA半缓冲派发、超时及错误通知回归 |
 | [tests/test_memory_layout.py](tests/test_memory_layout.py) | 在MSVC环境编译真实布局头文件及故意冲突的副本，确认重叠/越界/未对齐/格式尺寸错误被拒绝 |
 | [tests/test_wave_module.c](tests/test_wave_module.c) | 独立链接波形模块，检查插值、历史数据覆盖/epoch变化、时钟包验证与序号回绕 |
+| [tests/test_clap_module.c](tests/test_clap_module.c) | 独立链接A/B击掌模块，检查滚动历史、载荷校验、重复/旧包、序号回绕及重传/过期时间边界 |
 | [tests/test_wire.c](tests/test_wire.c) | 大小端编码的独立已知字节向量与非对齐访问回归 |
 | [tests/audio_paths.py](tests/audio_paths.py) | 统一提供音频回归输入路径，供测试脚本导入 |
 

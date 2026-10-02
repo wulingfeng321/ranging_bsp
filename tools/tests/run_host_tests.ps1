@@ -16,7 +16,7 @@ foreach ($rate in 48000) {
     $commands += "cl $common /LD /DAPP_AUDIO_SAMPLE_RATE=$rate /DAPP_RANGE_AUDIO_PROFILE=1 /DAPP_RANGE_JOINT_PEAKS=1 /DRANGE_DSP_PROFILE Core/Src/range_dsp.c tools/tests/peak_pair_host.c /link /OUT:`"$out/joint$rate.dll`" /IMPLIB:`"$out/joint$rate.lib`" /EXPORT:RangeDsp_Find /EXPORT:RangeDsp_Candidates /EXPORT:Test_Pair /EXPORT:Test_Pack /EXPORT:Test_Unpack /EXPORT:Test_SampleRate /EXPORT:Test_MacCount"
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
     foreach ($role in 1,2) {
-        $commands += "cl $common /DAPP_AUDIO_SAMPLE_RATE=$rate /DAPP_BOARD_ROLE=$role /DAPP_RANGE_JOINT_PEAKS=1 tools/tests/test_joint_fsm.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_wave.c /Fe`"$out/fsm${rate}_${role}.exe`""
+        $commands += "cl $common /DAPP_AUDIO_SAMPLE_RATE=$rate /DAPP_BOARD_ROLE=$role /DAPP_RANGE_JOINT_PEAKS=1 tools/tests/test_joint_fsm.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_wave.c Core/Src/app_clap.c /Fe`"$out/fsm${rate}_${role}.exe`""
         $commands += 'if not "%errorlevel%"=="0" exit /b 1'
         $commands += "`"$out/fsm${rate}_${role}.exe`""
         $commands += 'if not "%errorlevel%"=="0" exit /b 1'

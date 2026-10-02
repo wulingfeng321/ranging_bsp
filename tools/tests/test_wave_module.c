@@ -9,8 +9,8 @@ static uint32_t generation=7;
 static void Snapshot(uint64_t *count,uint32_t *epoch) { *count=newest;*epoch=generation; }
 int main(void)
 {
-  AppWaveAudio audio={ring,32768,7,10000,Snapshot};
-  AppWaveTime time={10000,1000000000.0,1000000000.0/48000.0};
+  AppAudioView audio={ring,32768,7,10000,Snapshot};
+  AppAudioTime time={10000,1000000000.0,1000000000.0/48000.0};
   int16_t trace[11];unsigned i;
   for(i=0;i<32768;++i) ring[i]=(int16_t)i;
   AppWave_Reset();

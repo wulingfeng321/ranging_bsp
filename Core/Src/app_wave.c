@@ -13,19 +13,19 @@ void AppWave_Reset(void)
 }
 const AppWaveClock *AppWave_GetClock(void) { return &clockState; }
 
-static int AudioValid(const AppWaveAudio *audio)
+static int AudioValid(const AppAudioView *audio)
 {
   return audio && audio->ring && audio->snapshot &&
     audio->ringSamples>2U*APP_AUDIO_HALF_FRAMES &&
     !(audio->ringSamples&(audio->ringSamples-1U));
 }
-static int Retained(const AppWaveAudio *audio,uint64_t first)
+static int Retained(const AppAudioView *audio,uint64_t first)
 {
   uint64_t count;uint32_t epoch;
   audio->snapshot(&count,&epoch);
   return epoch==audio->epoch && count>=first && count-first<audio->ringSamples;
 }
-int AppWave_Calibrate(const AppWaveAudio *audio,uint64_t blockEndNs,
+int AppWave_Calibrate(const AppAudioView *audio,uint64_t blockEndNs,
                       double samplePeriodNs,uint64_t (*nowNs)(void))
 {
   uint64_t end;uint32_t i;
@@ -57,7 +57,7 @@ int AppWave_AcceptClock(uint32_t id,uint64_t periodPs,uint64_t originNs,uint32_t
   clockId=id;clockState.periodPs=periodPs;clockState.originNs=originNs;
   clockState.calibrationMs=calibrationMs;return 1;
 }
-int AppWave_Read(const AppWaveAudio *audio,const AppWaveTime *time,
+int AppWave_Read(const AppAudioView *audio,const AppAudioTime *time,
                  uint64_t presentNs,int synchronized,int16_t *out,unsigned points)
 {
   uint64_t start,base;uint32_t i;
