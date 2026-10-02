@@ -1133,6 +1133,24 @@
           </configuration>
         </file>
         <file>
+          <name>$PROJ_DIR$\..\Core\Src\app_position.c</name>
+          <configuration>
+            <name>ranging_bsp</name>
+            <settings>
+              <name>ICCARM</name>
+              <data>
+                <version>35</version>
+                <wantNonLocal>1</wantNonLocal>
+                <debug>1</debug>
+                <option><name>CCOptLevel</name><state>3</state></option>
+                <option><name>CCOptLevelSlave</name><state>3</state></option>
+                <option><name>CCOptStrategy</name><state>0</state></option>
+                <option><name>CCOptStrategySlave</name><state>0</state></option>
+              </data>
+            </settings>
+          </configuration>
+        </file>
+        <file>
           <name>$PROJ_DIR$\..\Core\Src\app_net.c</name>
         </file>
         <file>

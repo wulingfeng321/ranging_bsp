@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "range_pair_diag.h"
 #include "app_clap.h"
+#include "app_position.h"
 /* Hardware PTP timestamps and audio anchors are nanoseconds, local monotonic
  * epoch. No UTC and no timestamp is taken at the end of signal processing. */
 typedef struct {
@@ -66,14 +67,6 @@ int AppRange_WaveRead(uint64_t presentMasterNs,int16_t *out,unsigned points);
 uint64_t AppRange_WavePeriodPs(void);
 uint32_t AppRange_WaveCalMs(void);
 int AppRange_WaveRelock(void);
-typedef struct {
-  int32_t angleDeg; /* 0 top/front, 90 right, clockwise */
-  uint32_t quality, residualNs, updatedMs, events, rejected;
-  uint32_t inputLevel, peakQuality[2], overruns, received, gapResets, backlogResets; /* Local diagnostics since page entry. */
-  uint32_t lagMaxSamples, dspMaxUs, lcdMaxUs; /* Position-only high water marks; lag at 24 kHz. */
-  uint8_t valid, calibration, calibrationCount; /* 0 uncal, 1 collecting, 2 ready, 3 failed */
-} AppPositionStatus;
-extern AppPositionStatus appPositionStatus;
 int AppRange_PositionCalibrate(void);
 int AppRange_ClearClapStats(void);
 void AppRange_Init(void);

@@ -2,6 +2,8 @@
 #define main original_test_main
 #include "test_app_range.c"
 #undef main
+/* Keep white-box detector boundary cases local to this integration test. */
+#include "../../Core/Src/app_position.c"
 static double coordinates[4][2]={{-.065,.01},{-.065,-.01},{.065,.01},{.065,-.01}};
 static double AngularError(double a,double b) { double d=fabs(a-b);return d>180 ? 360-d:d; }
 static void RunAngle(int deg)
