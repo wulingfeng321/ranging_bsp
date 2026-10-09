@@ -32,6 +32,8 @@
 #include "app_mic_scope.h"
 #include "board_audio.h"
 #include "board_memory.h"
+#include "board_temperature.h"
+#include "app_board_config.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -186,6 +188,8 @@ int main(void)
   AppCapture_Init();
   MicScope_Init();
   BoardAudio_Init(AppRange_Audio,AppRange_AudioError);
+  BoardTemperature_Init();
+  if(APP_BOARD_ROLE==APP_BOARD_A) AppRange_SetTemperatureReader(BoardTemperature_Read);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -200,6 +204,7 @@ int main(void)
     AppRange_Process();
     AppCapture_Process();
     BoardAudio_Process();
+    BoardTemperature_Process(!AppCapture_Busy());
     MicScope_Process();
   }
   /* USER CODE END 3 */

@@ -1,6 +1,6 @@
 # 工具目录
 
-更新日期：2026-10-02。
+更新日期：2026-10-09。
 
 本目录收录固件构建、保存数据解码、音频生成及主机测试工具。下列路径均相对于本目录；示例命令在工程根目录执行。
 
@@ -50,6 +50,8 @@ python tools/audio/generate.py all --regression
 | [tests/measure_dsp_load.py](tests/measure_dsp_load.py) | 统计48 kHz检测处理量、总乘加计数及最重切片 |
 | [tests/render_ui_previews.py](tests/render_ui_previews.py) | 将界面测试产生的PPM转为PNG并拼接预览，输出到`commit_logs/assets/2026-09-29-touch-ui/`；依赖Pillow，先运行界面测试 |
 | [tests/dsp_types.py](tests/dsp_types.py) | C检测器和候选配对接口的Python ctypes结构声明 |
+| [tests/test_remote_temperature.c](tests/test_remote_temperature.c) | 双角色远程AUTO，读取去重/重传、同温度保留结果、旧设置拒绝、反馈乱序、故障、取消与断线恢复 |
+| [tests/test_temperature.c](tests/test_temperature.c) | DHT11响应时序/小数/负温与校验，实际板级状态机的超时、预读、缓存失效、计时回绕及B板不启动硬件；使用temperature_stubs寄存器模型 |
 | [tests/test_board_audio.c](tests/test_board_audio.c) | 音频初始化、DMA半缓冲派发、超时及错误通知回归 |
 | [tests/test_memory_layout.py](tests/test_memory_layout.py) | 在MSVC环境编译真实布局头文件及故意冲突的副本，确认重叠/越界/未对齐/格式尺寸错误被拒绝 |
 | [tests/test_wave_module.c](tests/test_wave_module.c) | 独立链接波形模块，检查插值、历史数据覆盖/epoch变化、时钟包验证与序号回绕 |

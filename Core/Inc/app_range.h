@@ -52,8 +52,10 @@ int AppRange_AdjustTemperature(int32_t stepDeciC);
  * distributes accepted readings from either board to both boards. */
 typedef int (*AppRangeTemperatureReader)(int32_t *temperatureDeciC);
 void AppRange_SetTemperatureReader(AppRangeTemperatureReader reader);
-/* 1=request accepted, 0=no sensor/data, -1=busy/offline, -2=invalid reading.
- * One AUTO press reads once; no continuous acquisition or ADC/I2C driver here. */
+/* 1=request accepted/unchanged, 0=no sensor/data, -1=busy/offline, -2=invalid reading.
+ * B without a local reader requests A's cached sensor reading asynchronously;
+ * consult feedback and LINKED for completion. Repeated pending presses coalesce.
+ * One AUTO press applies once; no continuous temperature updates here. */
 int AppRange_AutoTemperature(void);
 /* Shared AUTO feedback: 0 clear, 1 OK, 2 N/A, 3 WAIT, 4 ERR. */
 unsigned AppRange_AutoTemperatureStatus(void);

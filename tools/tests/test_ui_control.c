@@ -26,7 +26,8 @@ int main(void)
   assert(appRangeArrival.valid==7 && appRangeArrival.localUs[0]==10000999);
   assert(appRangeArrival.localUs[1]==10041002 && appRangeArrival.localUs[2]==10081003);
   assert(appRangeArrival.syncUs[0]==(APP_BOARD_ROLE==APP_BOARD_B ? 999 : 1000999));
-  assert(AppRange_AutoTemperature()==0);
+  assert(AppRange_AutoTemperature()==(APP_BOARD_ROLE==APP_BOARD_A ? 0:1));
+  autoPendingId=0;autoPendingRead=0;
   AppRange_SetTemperatureReader(SensorRead);sensorValue=501;
   assert(AppRange_AutoTemperature()==-2);
   sensorValue=253;assert(AppRange_AutoTemperature()==1);
@@ -36,6 +37,11 @@ int main(void)
     assert(uiPendingId && uiRequestKind==1 && uiRequestValue==355);
     uiPendingId=0;
   }
+  uiKnown=1;uiAckRevision=uiRevision;uiPendingId=0;
+  sensorValue=temperature;rev=uiRevision;appRangeStatus.valid=1;
+  assert(AppRange_AutoTemperature()==1 && uiRevision==rev && !uiPendingId && appRangeStatus.valid);
+  sensorValue=-101;assert(AppRange_AutoTemperature()==-2);
+  captureBusy=1;assert(AppRange_AutoTemperature()==-1);captureBusy=0;
   AppRange_SetTemperatureReader(NULL);temperature=250;
   origin=syncOriginNs;
   assert(AppRange_RequestPage(APP_PAGE_WAVE));

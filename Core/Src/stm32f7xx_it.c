@@ -266,6 +266,11 @@ void DMA2D_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+#include "board_temperature.h"
+/* Application-owned TIM7 and EXTI6; preserve after CubeMX generation. */
+void TIM7_IRQHandler(void) { BoardTemperature_TimerIRQ(); }
+void EXTI9_5_IRQHandler(void) { BoardTemperature_EdgeIRQ(); }
+
 /* BSP audio owns this DMA handle (not CubeMX's hsai_BlockB2). */
 extern SAI_HandleTypeDef haudio_in_sai;
 void DMA2_Stream7_IRQHandler(void)

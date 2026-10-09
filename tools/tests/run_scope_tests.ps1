@@ -16,6 +16,12 @@ foreach ($test in @('board_audio','wire','app_net')) {
     $commands += "`"$out/$test.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
 }
+foreach ($role in 1,2) {
+    $commands += "cl /nologo /utf-8 /O2 /DAPP_BOARD_ROLE=$role /Itools/tests/temperature_stubs /ICore/Inc /Fo`"$out/`" tools/tests/test_temperature.c Core/Src/dht11.c /Fe`"$out/temperature$role.exe`""
+    $commands += 'if not "%errorlevel%"=="0" exit /b 1'
+    $commands += "`"$out/temperature$role.exe`""
+    $commands += 'if not "%errorlevel%"=="0" exit /b 1'
+}
 $commands += 'python tools/tests/test_memory_layout.py'
 $commands += 'if not "%errorlevel%"=="0" exit /b 1'
 $commands += "cl /nologo /utf-8 /O2 /ICore/Inc /Fo`"$out/`" tools/tests/test_wave_module.c Core/Src/app_wave.c /Fe`"$out/wave-module.exe`""
@@ -60,6 +66,10 @@ foreach ($role in 1,2) {
     $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_ui_control.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_range_protocol.c Core/Src/app_wave.c Core/Src/app_clap.c Core/Src/app_position.c /Fe`"$out/ui$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
     $commands += "`"$out/ui$role.exe`""
+    $commands += 'if not "%errorlevel%"=="0" exit /b 1'
+    $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_remote_temperature.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_range_protocol.c Core/Src/app_wave.c Core/Src/app_clap.c Core/Src/app_position.c /Fe`"$out/remote-temperature$role.exe`""
+    $commands += 'if not "%errorlevel%"=="0" exit /b 1'
+    $commands += "`"$out/remote-temperature$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'
     $commands += "cl $common /Itools/tests/net_stubs /ICore/Inc tools/tests/test_master_time.c Core/Src/range_dsp.c Core/Src/range_sync.c Core/Src/app_range_protocol.c Core/Src/app_wave.c Core/Src/app_clap.c Core/Src/app_position.c /Fe`"$out/master$role.exe`""
     $commands += 'if not "%errorlevel%"=="0" exit /b 1'

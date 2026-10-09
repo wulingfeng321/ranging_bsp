@@ -1094,6 +1094,12 @@
           <name>$PROJ_DIR$\..\Core\Src\app_mic_scope.c</name>
         </file>
         <file>
+          <name>$PROJ_DIR$\..\Core\Src\board_temperature.c</name>
+        </file>
+        <file>
+          <name>$PROJ_DIR$\..\Core\Src\dht11.c</name>
+        </file>
+        <file>
           <name>$PROJ_DIR$\..\Core\Src\board_audio.c</name>
         </file>
         <file>
@@ -1106,10 +1112,22 @@
                 <version>35</version>
                 <wantNonLocal>1</wantNonLocal>
                 <debug>1</debug>
-                <option><name>CCOptLevel</name><state>3</state></option>
-                <option><name>CCOptLevelSlave</name><state>3</state></option>
-                <option><name>CCOptStrategy</name><state>0</state></option>
-                <option><name>CCOptStrategySlave</name><state>0</state></option>
+                <option>
+                  <name>CCOptLevel</name>
+                  <state>3</state>
+                </option>
+                <option>
+                  <name>CCOptLevelSlave</name>
+                  <state>3</state>
+                </option>
+                <option>
+                  <name>CCOptStrategy</name>
+                  <state>0</state>
+                </option>
+                <option>
+                  <name>CCOptStrategySlave</name>
+                  <state>0</state>
+                </option>
               </data>
             </settings>
           </configuration>
@@ -1124,10 +1142,22 @@
                 <version>35</version>
                 <wantNonLocal>1</wantNonLocal>
                 <debug>1</debug>
-                <option><name>CCOptLevel</name><state>3</state></option>
-                <option><name>CCOptLevelSlave</name><state>3</state></option>
-                <option><name>CCOptStrategy</name><state>0</state></option>
-                <option><name>CCOptStrategySlave</name><state>0</state></option>
+                <option>
+                  <name>CCOptLevel</name>
+                  <state>3</state>
+                </option>
+                <option>
+                  <name>CCOptLevelSlave</name>
+                  <state>3</state>
+                </option>
+                <option>
+                  <name>CCOptStrategy</name>
+                  <state>0</state>
+                </option>
+                <option>
+                  <name>CCOptStrategySlave</name>
+                  <state>0</state>
+                </option>
               </data>
             </settings>
           </configuration>
@@ -1142,10 +1172,22 @@
                 <version>35</version>
                 <wantNonLocal>1</wantNonLocal>
                 <debug>1</debug>
-                <option><name>CCOptLevel</name><state>3</state></option>
-                <option><name>CCOptLevelSlave</name><state>3</state></option>
-                <option><name>CCOptStrategy</name><state>0</state></option>
-                <option><name>CCOptStrategySlave</name><state>0</state></option>
+                <option>
+                  <name>CCOptLevel</name>
+                  <state>3</state>
+                </option>
+                <option>
+                  <name>CCOptLevelSlave</name>
+                  <state>3</state>
+                </option>
+                <option>
+                  <name>CCOptStrategy</name>
+                  <state>0</state>
+                </option>
+                <option>
+                  <name>CCOptStrategySlave</name>
+                  <state>0</state>
+                </option>
               </data>
             </settings>
           </configuration>
@@ -1160,10 +1202,22 @@
                 <version>35</version>
                 <wantNonLocal>1</wantNonLocal>
                 <debug>1</debug>
-                <option><name>CCOptLevel</name><state>3</state></option>
-                <option><name>CCOptLevelSlave</name><state>3</state></option>
-                <option><name>CCOptStrategy</name><state>0</state></option>
-                <option><name>CCOptStrategySlave</name><state>0</state></option>
+                <option>
+                  <name>CCOptLevel</name>
+                  <state>3</state>
+                </option>
+                <option>
+                  <name>CCOptLevelSlave</name>
+                  <state>3</state>
+                </option>
+                <option>
+                  <name>CCOptStrategy</name>
+                  <state>0</state>
+                </option>
+                <option>
+                  <name>CCOptStrategySlave</name>
+                  <state>0</state>
+                </option>
               </data>
             </settings>
           </configuration>

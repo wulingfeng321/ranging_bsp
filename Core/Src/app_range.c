@@ -34,12 +34,13 @@ static AppPage uiPage = APP_PAGE_STANDARD;
 static int32_t temperature = APP_TEMPERATURE_DECI_C;
 static AppRangeTemperatureReader temperatureReader;
 static uint32_t autoStatus,autoSerial=1,autoRequestCounter,autoPendingId,autoPendingStatus;
-static uint32_t autoSeenRequest,autoSeenState;
+static uint32_t autoSeenRequest,autoSeenState,autoReadRevision;
+static uint8_t autoPendingRead;
 static void AutoFeedback(uint32_t status)
 {
   autoStatus=status;
   if(APP_BOARD_ROLE==APP_BOARD_A) { if(!++autoSerial) ++autoSerial; }
-  else { autoPendingStatus=status;autoPendingId=++autoRequestCounter;
+  else { autoPendingRead=0;autoPendingStatus=status;autoPendingId=++autoRequestCounter;
     if(!autoPendingId) autoPendingId=++autoRequestCounter; }
 }
 unsigned AppRange_AutoTemperatureStatus(void) { return autoStatus; }
@@ -133,7 +134,8 @@ static uint64_t Send(uint8_t type, uint32_t id, uint32_t epoch,
   { etharp_request(&gnetif, ip_2_ip4(&peer)); return 0; }
   packet.type=type;packet.role=APP_BOARD_ROLE;
   packet.senderSession=AppNet_LocalSession();packet.receiverSession=AppNet_PeerSession();
-  packet.id=id;packet.epoch=epoch;packet.revision=uiRevision;
+  packet.id=id;packet.epoch=epoch;
+  packet.revision=type==APP_RANGE_MSG_AUTO_READ_REQUEST ? autoReadRevision : uiRevision;
   packet.payload[0]=x;packet.payload[1]=y;packet.payload[2]=z;packet.payload[3]=u;packet.payload[4]=v;
   AppRangeProtocol_Encode(bytes,&packet);
   p=pbuf_alloc(PBUF_TRANSPORT,APP_RANGE_WIRE_SIZE,PBUF_RAM);
@@ -203,6 +205,8 @@ static void ApplyUi(AppPage page,int32_t temp)
 static int RequestUi(uint32_t kind,uint32_t value)
 {
   if(AppCapture_Busy() || !AppRange_SettingsReady()) return 0;
+  /* A later explicit setting supersedes an outstanding remote AUTO press. */
+  if(autoPendingRead) AutoFeedback(0);
   if(APP_BOARD_ROLE==APP_BOARD_A) {
     ++uiRevision; if(!uiRevision) ++uiRevision;
     ApplyUi(kind==0 ? (AppPage)value : uiPage,kind==1 ? (int32_t)value-100 : temperature);
@@ -242,10 +246,18 @@ int AppRange_AutoTemperature(void)
 {
   int32_t value,rounded;
   if(AppCapture_Busy() || !AppRange_SettingsReady()) { AutoFeedback(3);return -1; }
+  if(APP_BOARD_ROLE==APP_BOARD_B && !temperatureReader) {
+    if(!autoPendingRead) {
+      AutoFeedback(3);autoPendingRead=1;autoReadRevision=uiRevision;uiLastSend=HAL_GetTick()-250U;
+    }
+    return 1; /* A reads its sensor; repeated presses retain the same request id. */
+  }
   if(!temperatureReader || !temperatureReader(&value)) { AutoFeedback(2);return 0; }
   if(value< -100 || value>500) { AutoFeedback(4);return -2; }
   /* Preserve the existing 0.5 C wire/UI grid, symmetric at negative values. */
   rounded=value>=0 ? ((value+2)/5)*5 : -(((-value+2)/5)*5);
+  /* A matching cached reading must not discard an active measurement. */
+  if(rounded==temperature) { AutoFeedback(1);return 1; }
   if(RequestUi(1,(uint32_t)(rounded+100))) { AutoFeedback(1);return 1; }
   AutoFeedback(3);return -1;
 }
@@ -265,7 +277,8 @@ static void UiProcess(uint32_t now)
   if(APP_BOARD_ROLE==APP_BOARD_A)
     Send(APP_RANGE_MSG_AUTO_STATUS_STATE,autoSerial,0,autoStatus,autoSeenRequest,0,0,0);
   else if(autoPendingId)
-    Send(APP_RANGE_MSG_AUTO_STATUS_REQUEST,autoPendingId,0,autoPendingStatus,0,0,0,0);
+    Send(autoPendingRead ? APP_RANGE_MSG_AUTO_READ_REQUEST : APP_RANGE_MSG_AUTO_STATUS_REQUEST,
+         autoPendingId,0,autoPendingRead ? 0 : autoPendingStatus,0,0,0,0);
   if(APP_BOARD_ROLE==APP_BOARD_A)
     Send(APP_RANGE_MSG_UI_STATE,uiRevision,0,(uint64_t)(temperature+100),uiPage,syncOriginNs,peerEpoch,uiLastRequest);
   else if(uiPendingId)
@@ -320,6 +333,17 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
   x=packet.payload[0];y=packet.payload[1];z=packet.payload[2];
   /* Feedback is independent from measurement revision: N/A must not reset
    * a running measurement. Periodic snapshots/retries survive packet loss. */
+  if(type==APP_RANGE_MSG_AUTO_READ_REQUEST && APP_BOARD_ROLE==APP_BOARD_A) {
+    if(!id || epoch || x || y || z || packet.payload[3] || packet.payload[4]) goto reject;
+    if(!autoSeenRequest || (id!=autoSeenRequest && id-autoSeenRequest<0x80000000UL)) {
+      /* Do not re-read or reapply on retransmission, even after the first read
+       * changed revision. New requests from an older setting cannot overwrite it. */
+      autoSeenRequest=id;
+      if(packet.revision!=uiRevision || uiPage!=APP_PAGE_STANDARD) AutoFeedback(3);
+      else AppRange_AutoTemperature();
+    }
+    uiLastSend=now-250U;return;
+  }
   if(type==APP_RANGE_MSG_AUTO_STATUS_REQUEST && APP_BOARD_ROLE==APP_BOARD_A) {
     if(!id || x>4) goto reject;
     if(!autoSeenRequest || (id!=autoSeenRequest && id-autoSeenRequest<0x80000000UL)) {
@@ -332,7 +356,13 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
     if(autoSeenState && id!=autoSeenState && id-autoSeenState>=0x80000000UL) return;
     if(autoPendingId && y!=autoPendingId) return;
     autoSeenState=id;autoStatus=(uint32_t)x;
-    if(autoPendingId && y==autoPendingId) autoPendingId=0;
+    if(autoPendingId && y==autoPendingId) {
+      /* OK may arrive before UI_STATE. Keep LINKED false until its new
+       * temperature revision arrives, without clearing same-value results. */
+      if(autoPendingRead && x==1 && packet.revision!=uiRevision &&
+         packet.revision-uiRevision<0x80000000UL) uiKnown=0;
+      autoPendingId=0;autoPendingRead=0;
+    }
     return;
   }
   if(APP_BOARD_ROLE==APP_BOARD_A && type==APP_RANGE_MSG_UI_ACK) {
@@ -1029,6 +1059,7 @@ void AppRange_Process(void)
       connection=appNetStatus.online?AppNet_PeerSession():0;
       Unlock(); appRangeStatus.resultId=0; lastSyncNs=0; lastStateId=0;
       uiKnown=0; uiAckRevision=0; uiPendingId=0;
+      if(autoPendingRead) { autoPendingRead=0;autoPendingId=0;autoStatus=3; }
       if(connection && connection!=uiPeerSession) {
         uiPeerSession=connection; uiLastRequest=0;
         autoSeenRequest=autoSeenState=autoPendingId=autoStatus=0;

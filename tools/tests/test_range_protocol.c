@@ -39,7 +39,7 @@ int main(void)
     assert(!Decode(&out,bad,76));assert(!memcmp(&out,&before,sizeof(out)));
   }
   memcpy(bad,golden,76);bad[5]=255;assert(Decode(&out,bad,76) && out.type==255);
-  for(role=1;role<=2;++role) for(type=1;type<=21;++type) {
+  for(role=1;role<=2;++role) for(type=1;type<=APP_RANGE_MSG_AUTO_READ_REQUEST;++type) {
     in.type=(uint8_t)type;in.role=(uint8_t)role;
     in.id=UINT32_MAX;in.epoch=0;in.revision=UINT32_MAX;
     for(i=0;i<5;++i) in.payload[i]=(i&1) ? 0:UINT64_MAX;

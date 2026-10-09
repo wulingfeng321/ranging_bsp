@@ -1,8 +1,10 @@
 # 代码模块与调用边界
 
-更新日期：2026-10-02。
+更新日期：2026-10-09。
 
 `9ee54c2`、`e6607ee`、`51ba242`分别保存音频/UI与功能裁剪、内存/波形、击掌拆分；`3bb7718`保存经过用户功能反馈及10核验的定位拆分。本检查点独立测量协议编解码，三类回归、A/B全量构建和双板下载校验通过，12/13已通过标准测距采集、配对及完整声音对应的保存核验；11提前触发边界仍未修复，其他功能反馈待补充。保留Core/Inc与Core/Src目录，通过接口划分职责。
+
+10月9日基于`a41bab5`接入A板DHT11后台读取及AUTO有效缓存应用，主机回归/A/B构建/下载校验通过，用户已确认A板温度更新及B远程AUTO正常；读数准确性仍待量化实测，见[接入记录](../commit_logs/2026-10-09-dht11-temperature.md)。
 
 ## 1. 模块职责
 
@@ -14,6 +16,7 @@
 | `app_position.c/.h` | 定位短扫频检测状态、配对、校准/偏置、方向及重传选择；无HAL/UI/UDP依赖 |
 | `app_clap.c/.h` | 击掌检测状态、候选配对/过期、历史快照、载荷去重与重传选择；无HAL/UI/UDP依赖 |
 | `app_wave.c/.h` | 单音周期拟合、公共周期状态/去重、10 ms窗口插值；通过只读音频视图和快照回调访问环形缓冲，无HAL/UI/UDP依赖 |
+| `board_temperature.c/.h`、`dht11.c/.h` | A板DHT11异步采集及缓存；TIM7/EXTI6只记录边沿与结束状态，纯解码器在主循环校验数据；不依赖UI/UDP |
 | `board_audio.c/.h` | 独占BSP音频启动、DMA半/全缓冲和错误回调；检查采集超时与SAI错误，通过回调通知应用；不依赖UI、测距、SD或网络模块 |
 | `app_mic_scope.c/.h` | 四页绘制、触摸与刷新调度；从`BoardAudio_GetState`读取采集状态，不再启动采音或拥有DMA回调 |
 | `app_range.c/.h` | 音频时基、页面/温度联动、同步/测量协议和各页面算法调度；仍是应用协调层，后续可逐批拆分 |
@@ -28,8 +31,8 @@
 
 ## 2. 调用上下文与缓冲生命周期
 
-- 初始化顺序：网络、测距、LCD/SDRAM、保存、界面，最后`BoardAudio_Init(AppRange_Audio, AppRange_AudioError)`。音频回调注册后才启动DMA。
-- 主循环顺序：`MX_LWIP_Process` → `AppNet_Process` → `AppRange_Process` → `AppCapture_Process` → `BoardAudio_Process` → `MicScope_Process`。
+- 初始化顺序：网络、测距、LCD/SDRAM、保存、界面，调用`BoardAudio_Init(AppRange_Audio, AppRange_AudioError)`后初始化`BoardTemperature`，仅A注册温度读取回调。音频回调注册后才启动DMA。
+- 主循环顺序：`MX_LWIP_Process` → `AppNet_Process` → `AppRange_Process` → `AppCapture_Process` → `BoardAudio_Process` → `BoardTemperature_Process(!AppCapture_Busy())` → `MicScope_Process`。
 - 音频ISR：`board_audio`按半缓冲调用`AppRange_Audio`，应用完成PCM/锚点搬运及定位两点平均。PCM指针只在当前回调期间借用，消费者不得保留指针等待下次主循环；DMA会重复使用该缓冲。
 - DMA错误通知可来自ISR；超时/SAI错误通知来自主循环。`AppRange_AudioError`应保持短小、可重复调用。检测相关、网络事务、绘屏和SD写入在主循环执行。
 - `AppCapture_SetEnabled`只在主循环调用，由页面切换和保存轮询保证状态一致。离开/进入STANDARD清空未保存的PCM、锚点有效计数和日志，不重置时钟同步；同页调温不清空录音。保存占用期间禁止切页，保留失败轮重试。
@@ -94,3 +97,13 @@ AppRangeProtocol只处理固定RAN2线格式，AppRangePacket是调用内数据�
 | 72 | UI revision，32位 |
 
 来源IP/端口、pbuf生命周期、ARP解析和硬件收发时间戳由app_range保留；页面/epoch/revision准入和去重仍由原消息处理层负责。CAP1保存协议及网络身份协议不合并入RAN2。详见[协议整理记录](../commit_logs/2026-10-02-range-protocol.md)。
+
+## 8. DHT11采集边界
+
+仅A板启用PG6/D2开漏、TIM7和EXTI6。TIM7使用当前100 MHz APB1定时器时钟分频至1 MHz，20 ms启动低电平后在中断中释放总线，6 ms接收超时；不依赖LCD/SD期间的主循环及时返回。EXTI6双边沿记录83个时间点，收到完整帧或超时后关闭接收中断。两个中断优先级均3，高于音频DMA的15和SD的6；ISR只搬运边沿，解码和设置温度均在主循环，无整段关中断等待。
+
+CubeMX保持PG6开漏/初始High/外部上拉；仍使用用户保留的ARDUINO_D2标签。应用在BSP初始化之后将原未使用PD6音频事件的EXTI6映射到PG6，并关闭该线的事件掩码。不要另启用PD6的EXTI6功能，也不要将TIM7分配给其他模块；TIM2同步脉冲和TIM6 HAL时基不变。TIM7/EXTI9_5处理函数位于stm32f7xx_it.c用户区，自定义两个源文件须保留在IAR工程中。
+
+状态缓存由主循环拥有，边沿缓冲仅在完成后读取；BoardTemperature_Read只返回未过期、最近采集未失败的缓存。轮询约2.5秒，启动/失败/长暂停后先预读再发布，7.5秒缓存过期；保存忙仅推迟新事务，已开始的事务仍由中断有界结束。BoardTemperature_GetStatus提供成功帧、超时、时序/校验/数据错误计数及原始温湿度，湿度暂不参与声速公式或UI显示。
+
+B未注册本地温度回调时，AUTO发送新增RAN2消息22（AUTO_READ_REQUEST）。沿用版本12/76字节及原消息1～21，远程AUTO要求两板均使用本版。请求使用与AUTO反馈共用的单调序号，携带发起时的设置revision；每250 ms重传，A按会话/序号去重并拒绝旧设置或非STANDARD的读取。A按既有温度设置协议发布结果，AUTO_STATUS_STATE回传已处理请求号。B匹配请求号后完成；若OK先于新UI_STATE到达，则先等待设置同步，不提前显示LINKED。相同温度不清空测量，待处理的重复点击复用原请求；手动设置/切页或断线会取消本地待处理读取，重连不自动重放旧AUTO。

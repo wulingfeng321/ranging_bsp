@@ -27,7 +27,8 @@ typedef enum {
   APP_RANGE_MSG_CLAP_EVENT=18,
   APP_RANGE_MSG_CLAP_RESULT=19,
   APP_RANGE_MSG_AUTO_STATUS_REQUEST=20,
-  APP_RANGE_MSG_AUTO_STATUS_STATE=21
+  APP_RANGE_MSG_AUTO_STATUS_STATE=21,
+  APP_RANGE_MSG_AUTO_READ_REQUEST=22
 } AppRangeMessageType;
 /* Host representation only: never copy this structure onto the wire. */
 typedef struct {
