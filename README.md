@@ -1,8 +1,10 @@
 # ranging_bsp · 双开发板声学测距
 
-更新日期：2026-10-09。
+更新日期：2026-10-26。
 
 基于两块STM32F746G-DISCO，通过以太网建立统一时间基准，采集声音并交换到达时刻，在板端完成测距、声源侧判断、波形显示与四麦方向估计；测量数据可保存到A板SD卡供PC离线分析。
+
+网页分析工具 **Ranging Studio** 已作为 Git 子模块收录于 [`tools/web_tools/`](tools/web_tools/README.md)，支持上传保存数据、联动查看波形与事件、播放双板录音、对比实验及生成 AI 分析报告。课程展示地址：[ranging.wulingfeng.top](https://ranging.wulingfeng.top)；也可在 Windows 本地运行，具体操作见[用户手册第6章](USER_MANUAL.md#6-网页实验分析工具)。
 
 ## 1. 整体目标
 
@@ -33,6 +35,7 @@
 | 温度与质量 | 手动调温、显示声速并同步两板；相关质量、低质量/歧义拒绝与计数；A板DHT11后台采集，AUTO读取有效缓存并同步两板 |
 | 页面与触摸 | STANDARD、CLAP、SYNC WAVE、POSITION四页联动；DETAILS本板详情；标准/定位本地2 Hz、击掌公共10 Hz刷新目标 |
 | 保存与导出 | 仅STANDARD页A板USER键保存双板原始PCM、锚点及日志，失败保留与重试、成功后双板恢复；标准RNG校验导出WAV/JSON/CSV |
+| 网页实验分析 | RNG文件校验与导入、配对/波形/事件联动、时钟和采集状态、解析数据浏览、双板音频播放与WAV/CSV导出、多轮对比、AI报告及受密码保护的数据管理 |
 
 历史版本已有主机回归、A/B构建与烧录，以及多轮实机反馈和录音回验。本次模块拆分和功能裁剪已通过主机回归与A/B全量编译，并完成双板烧录及下载校验；用户反馈其余功能正常，重新保存的R000007完整覆盖15次成功测量，已保存恢复点`9ee54c2`。其后的内存布局集中管理及波形模块拆分已通过主机回归和A/B编译，已完成双板烧录及下载校验，用户反馈其余功能正常，08保存检查与重播边界已记录，保存为恢复点`e6607ee`。击掌拆分已保存为`51ba242`，用户反馈其他功能正常，09保存/采样检查通过，A录音削顶已记录。定位拆分经用户反馈及10核验后保存为`3bb7718`。`a41bab5`独立RAN2测量编解码与包头校验，包格式及业务规则保持一致；三类回归和A/B编译通过，已烧录并通过下载校验，12/13已通过标准测距采集、配对及完整声音对应的保存核验；11提前触发边界仍未修复，其他功能反馈待补充。固件与工具仅支持48 kHz；击掌距离、方向和历史统计保留，击掌录音保存及日志已移除。功能实现与完整指标验收分开判断，**当前尚未完成课程整体验收**。标准测距的单次预览与约11秒统计结果须分别评估；详细证据、配置和未验收项统一见[PROJECT_STATUS](PROJECT_STATUS.md)。
 
@@ -75,9 +78,29 @@
 | `tools/` | A/B角色构建及RNG解码等PC工具 |
 | `tools/audio/`、`tools/audio/generated/` | 统一音频生成/显式模板导出，及按用途/采样率/时长命名的播放音与回归输入 |
 | `tools/tests/` | 标准状态机/时基、界面/击掌/定位/波形及录音保存主机回归 |
+| `tools/web_tools/` | 独立Git子模块：React/TypeScript/Plotly前端、FastAPI/Python后端、SQLite实验记录及部署脚本 |
 | `commit_logs/` | 功能实现与验证记录、界面预览和历史交接资料 |
 
 工程使用IAR EWARM 8.2，采用主循环状态机，无RTOS；头文件默认角色为B，角色构建脚本显式生成A/B配置。板级BSP及组件已收录在`Drivers/BSP/`，字体位于`Drivers/Fonts/`，当前固件构建不再引用仓库外的上层BSP/字体目录；来源、收录范围及本地路径适配见[依赖说明](Drivers/DEPENDENCIES.md)。
+
+### 3.1 获取网页工具子模块
+
+当前集成位于主仓库 `release` 分支。首次获取完整工程（需已配置GitHub SSH访问）：
+
+```powershell
+git clone --branch release --recurse-submodules git@github.com:wulingfeng321/ranging_bsp.git
+```
+
+已有包含子模块配置的工程，在根目录执行：
+
+```powershell
+git submodule sync -- tools/web_tools
+git submodule update --init -- tools/web_tools
+```
+
+子仓库地址：[wulingfeng321/ranging_web_tool](https://github.com/wulingfeng321/ranging_web_tool)，开发分支为 `wlf/local-analysis`。主工程记录确定的子仓库提交号；初始化后处于该提交的分离HEAD状态是正常现象。仅构建固件或使用命令行解码时，无需安装网页工具依赖。
+
+本机已保留运行环境，可双击 `tools\web_tools\start-local.cmd`。新电脑需安装Python、Node.js并准备依赖，见[工具目录](tools/README.md)。Git仅传输源码，实验数据、AI密钥和管理密码配置需单独准备；本地与云端数据各自独立，不自动同步。公开网站用于临时课程展示，课程结束后可能关闭，本地工具仍可使用。
 
 ## 4. 文档列表
 
@@ -85,13 +108,15 @@
 | --- | --- |
 | [README](README.md) | 项目目标、功能概览、工程入口与交接规范 |
 | [PROJECT_STATUS](PROJECT_STATUS.md) | 当前代码与板上固件状态、配置、验收差距、测试证据及下一阶段待办 |
-| [USER_MANUAL](USER_MANUAL.md) | 准备与页面导航、编译/烧录流程、四页操作与参数、保存故障处理及PC解码产物 |
+| [USER_MANUAL](USER_MANUAL.md) | 准备与页面导航、编译/烧录流程、四页操作与参数、保存故障处理、PC解码及网页分析流程 |
 | [CHANGELOG](CHANGELOG.md) | Git提交与功能日志索引、历史记录及日志模板 |
 | [EARLY1_ECHO_REPORT](EARLY1_ECHO_REPORT.md) | early1回声实验的方案、数据、失败结论与归档边界 |
 | [工具目录](tools/README.md) | tools下的脚本用途、常用入口与运行依赖 |
 | [代码模块说明](Core/README.md) | 应用/算法/板级边界、调用上下文、缓冲归属及CubeMX维护约定 |
 | [依赖说明](Drivers/DEPENDENCIES.md) | 工程内BSP、组件、字体的来源、收录范围与路径适配 |
 | [音频工具说明](tools/audio/README.md) | 统一生成入口、参数、文件命名、当前播放音与回归音列表、模板导出及验证 |
+| [网页工具说明](tools/web_tools/README.md) | 本地启动、网页功能、数据解读与开发测试 |
+| [网页部署与维护](tools/web_tools/docs/server-deployment.md) | 腾讯云Ubuntu部署、服务与HTTPS、管理配置、数据备份与恢复 |
 | [commit_logs](commit_logs/) | 各功能的实现过程、资源影响、编译/测试/烧录和实机反馈原始记录 |
 
 阅读顺序：先了解本README，再按需要查阅代码状态或用户手册；复核功能变更和测试证据时，从CHANGELOG进入对应日志。状态和操作文档使用稳定文件名，更新日期在文件内维护。
@@ -106,5 +131,6 @@
 6. 固件修改编译相关A/B配置并进行针对性验证；区分主机通过、编译通过、下载校验、实机功能反馈和完整验收。已有回归入口为`run_host_tests.ps1`、`run_scope_tests.ps1`、`run_capture_tests.ps1`，位于`tools/tests/`；执行前核对工具及输入依赖。
 7. 保存失败轮和原始数据，记录音频/固件版本、真值参考点、几何摆放、播放设备/音量、温度及批次。目录号、文件头标识或文件系统日期不能单独代表固件或采集版本。
 8. 提交前审阅差异，不混入个人IDE状态、临时工程、构建产物或大体积原始录音。共享`.ioc/.ewp/.ewd`变更说明原因；Git提交、推送、烧录和测试结果分别记录，归档分支实验不直接视作当前基线。
+9. 网页工具在子仓库内独立提交和推送，再到主仓库提交并推送`tools/web_tools`版本指针。具体命令见[工具目录](tools/README.md)；提交源码不等于更新服务器，部署时单独备份数据并记录发布版本。
 
 按用户2026-10-02授权，后续固件改动在编译及必要检查通过、开发板已连接时，直接执行对应A/B烧录，无需再次单独确认；烧录前核对角色、探针和产物，启用下载校验，实机反馈单独记录。

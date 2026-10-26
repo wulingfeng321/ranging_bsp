@@ -1,16 +1,8 @@
 # 工具目录
 
-更新日期：2026-10-09。
+更新日期：2026-10-26。
 
-本目录收录固件构建、保存数据解码、音频生成及主机测试工具。下列路径均相对于本目录；示例命令在工程根目录执行。
-
-## 网页实验分析工具（Git 子模块）
-
-[`web_tools/`](web_tools/README.md) 为 Ranging Studio 网页工具的独立仓库，提供波形、实验对比、AI 分析和数据管理。在本机双击 `tools\web_tools\start-local.cmd` 启动；依赖安装和测试见子仓库 README。
-
-主工程只记录子仓库的提交号；修改时先在子仓库提交，再在主工程提交更新后的子模块指针。本地实验数据、API 配置及依赖不进入两个仓库的版本历史。
-
-子模块远程仓库为 [ranging_web_tool](https://github.com/wulingfeng321/ranging_web_tool)，SSH 地址为 `git@github.com:wulingfeng321/ranging_web_tool.git`。克隆主工程时使用 `git clone --recurse-submodules <主工程地址>`；已有工作目录执行 `git submodule sync -- tools/web_tools`，再执行 `git submodule update --init -- tools/web_tools`。电脑需具备两个仓库的 SSH 访问权限。先推送子仓库提交，再推送主工程的版本指针；本地实验数据和私有配置仍需单独迁移。
+本目录收录固件构建、保存数据解码、网页实验分析、音频生成及主机测试工具。下列路径均相对于本目录；除另有说明，示例命令在工程根目录执行。
 
 ## 1. 固件构建与数据解码
 
@@ -84,7 +76,82 @@ DSP音频分析测试依赖NumPy；图像转换脚本依赖Pillow。可用`pytho
 
 `tests/`中的C文件是测试程序及动态库适配代码，覆盖测距/批次/时钟、击掌/定位/波形、网络/界面和保存逻辑；`*_stubs/`为主机模拟硬件接口。`__pycache__/`为Python运行缓存，不属于工具源文件。
 
-## 4. 维护约定
+## 4. 可视化工具
+
+[`web_tools/`](web_tools/README.md) 为 Ranging Studio 网页工具的独立仓库，提供RNG导入与校验、配对和波形联动、检出事件标记、时钟/采集状态、解析记录浏览、双板音频播放、多轮实验对比、AI报告和管理页面。操作流程见[用户手册第6章](../USER_MANUAL.md#6-网页实验分析工具)。仅需拆分WAV/CSV时，可继续使用下文的`decode_capture.py`。
+
+### 获取与启动
+
+子模块远程仓库为[ranging_web_tool](https://github.com/wulingfeng321/ranging_web_tool)，SSH地址为`git@github.com:wulingfeng321/ranging_web_tool.git`，开发分支为`wlf/local-analysis`。主工程`release`分支记录固定子模块提交号；电脑需具备两个仓库的SSH访问权限。
+
+```powershell
+# 已有主工程，在工程根目录初始化或同步所记录的网页工具版本
+git submodule sync -- tools/web_tools
+git submodule update --init -- tools/web_tools
+```
+
+首次克隆主工程的完整命令见[根目录README](../README.md#31-获取网页工具子模块)。初始化只获取源码，不包含依赖、构建产物、实验数据或私有配置。本机已准备运行环境，可直接双击`tools\web_tools\start-local.cmd`，浏览器打开[127.0.0.1:8000](http://127.0.0.1:8000)。
+
+新Windows电脑先安装Git、Python和Node.js/npm；本地已验证Python 3.13、Node.js 24。准备依赖和前端构建：
+
+```powershell
+# 从主工程根目录开始，执行后停留在网页工具根目录
+Set-Location tools/web_tools
+py -3.13 -m venv backend/.venv
+.\backend\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
+Push-Location frontend
+npm.cmd ci
+npm.cmd run build
+Pop-Location
+.\start-local.cmd
+```
+
+保持启动窗口运行，按Ctrl+C停止。应用使用React/TypeScript/Plotly、FastAPI和SQLite；普通本地分析无需额外数据库服务或AI Key。需要管理功能时，在网页工具根目录运行`.\backend\.venv\Scripts\python.exe scripts/set_admin_password.py`设置管理密码，然后重启服务。
+
+### 数据、配置与部署
+
+| 路径（相对web_tools） | 用途 | Git管理 |
+| --- | --- | --- |
+| `backend/app/`、`frontend/src/` | 后端分析/API及网页源码 | 是 |
+| `config/prompts/`、`config/ai.example.toml` | AI提示词和不含密钥的示例配置 | 是 |
+| `data/` | SQLite实验记录、上传文件、音频缓存等；可由`RANGING_DATA_DIR`改写位置 | 否，单独备份 |
+| `config/ai.local.toml`、`config/admin.local.json` | 本机AI配置和管理密码哈希 | 否，私有配置 |
+| `backend/.venv/`、`frontend/node_modules/`、`frontend/dist/` | 本机依赖和前端构建 | 否，在目标电脑准备 |
+| `deploy/`、`scripts/package_release.py` | Linux部署配置及发布打包入口 | 是 |
+
+公开展示地址：[ranging.wulingfeng.top](https://ranging.wulingfeng.top)。云端运行于腾讯云Ubuntu 24.04，普通页面公开，AI配置和删除操作要求管理登录。本地与云端数据独立，Git推送不会自动同步实验或部署网站；详细发布、HTTPS、备份和恢复步骤见[服务器维护说明](web_tools/docs/server-deployment.md)，AI接入见[AI说明](web_tools/docs/ai-analysis.md)。原迁移时的本机裸仓库、清单及`local-backup`配置已清理，获取代码直接使用GitHub。
+
+### 开发、验证与提交
+
+子模块初始化后可能处于分离HEAD状态，这是按主工程固定提交检出的正常结果。准备编辑时先检查子仓库状态，再切换到已有开发分支；不要在未核对改动时强制更新或重置子模块。前后端开发服务的启动方式见[网页工具README](web_tools/README.md)。
+
+以下在网页工具根目录执行，后端测试使用隔离的临时数据库：
+
+```powershell
+Push-Location backend
+.\.venv\Scripts\python.exe -m pytest tests -q
+Pop-Location
+Push-Location frontend
+npm.cmd test
+npm.cmd run build
+Pop-Location
+```
+
+修改后先在子仓库审阅、提交并推送，再提交主工程的子模块指针。以下示例仅更新网页工具版本；其他文档按实际修改单独暂存：
+
+```powershell
+# 网页工具根目录：先用git status/git diff检查，再暂存具体修改文件并提交
+git push origin wlf/local-analysis
+# 返回主工程根目录，记录已推送的子仓库提交
+Set-Location ../..
+git add -- tools/web_tools
+git commit -m "chore: update web tool submodule"
+git push origin release
+```
+
+主仓库记录子仓库提交号，不将网页源码重复纳入自身历史；仅推送主仓库不能传输未推送的子仓库提交。其他电脑拉取主仓库后执行`git submodule update --init -- tools/web_tools`获取该固定版本，无需用`--remote`追随分支最新提交。
+
+## 5. 维护约定
 
 新增、移动或删除工具时同步更新本目录；专用工具的详细参数保留在对应子目录说明中。生成音频与模板时核对固件采样率和方案；测试产物、模拟图像与原始实验数据分别保存，避免混淆验证来源。
 
