@@ -4,6 +4,14 @@
 
 本目录收录固件构建、保存数据解码、音频生成及主机测试工具。下列路径均相对于本目录；示例命令在工程根目录执行。
 
+## 网页实验分析工具（Git 子模块）
+
+[`web_tools/`](web_tools/README.md) 为 Ranging Studio 网页工具的独立仓库，提供波形、实验对比、AI 分析和数据管理。在本机双击 `tools\web_tools\start-local.cmd` 启动；依赖安装和测试见子仓库 README。
+
+主工程只记录子仓库的提交号；修改时先在子仓库提交，再在主工程提交更新后的子模块指针。本地实验数据、API 配置及依赖不进入两个仓库的版本历史。
+
+当前子模块 URL 为本机裸仓库 `E:/个人项目/ranging-data-studio.git`。本机克隆主工程后，可用 `git -c protocol.file.allow=always submodule update --init -- tools/web_tools` 获取源码。其他电脑需先将子仓库发布到远程 Git 服务，再更新 `.gitmodules` 并执行 `git submodule sync -- tools/web_tools`；仅推送主工程不能传输子仓库内容或本地实验数据。
+
 ## 1. 固件构建与数据解码
 
 | 脚本 | 大致作用 |
