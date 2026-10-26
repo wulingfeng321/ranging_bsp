@@ -10,7 +10,7 @@
 
 主工程只记录子仓库的提交号；修改时先在子仓库提交，再在主工程提交更新后的子模块指针。本地实验数据、API 配置及依赖不进入两个仓库的版本历史。
 
-当前子模块 URL 为本机裸仓库 `E:/个人项目/ranging-data-studio.git`。本机克隆主工程后，可用 `git -c protocol.file.allow=always submodule update --init -- tools/web_tools` 获取源码。其他电脑需先将子仓库发布到远程 Git 服务，再更新 `.gitmodules` 并执行 `git submodule sync -- tools/web_tools`；仅推送主工程不能传输子仓库内容或本地实验数据。
+子模块远程仓库为 [ranging_web_tool](https://github.com/wulingfeng321/ranging_web_tool)，SSH 地址为 `git@github.com:wulingfeng321/ranging_web_tool.git`。克隆主工程时使用 `git clone --recurse-submodules <主工程地址>`；已有工作目录执行 `git submodule sync -- tools/web_tools`，再执行 `git submodule update --init -- tools/web_tools`。电脑需具备两个仓库的 SSH 访问权限。先推送子仓库提交，再推送主工程的版本指针；本地实验数据和私有配置仍需单独迁移。
 
 ## 1. 固件构建与数据解码
 
