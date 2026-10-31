@@ -82,7 +82,7 @@ static void CheckReceiveAndExpiry(void)
 static void Pair(uint32_t now,double bias,uint32_t quality,AppPositionTx *tx)
 {
   uint64_t local[2],remote[2],base=10000000000ULL;
-  double lower=(sqrt(.065*.065+.51*.51)-sqrt(.065*.065+.49*.49))*1e9/346.45;
+  double lower=(sqrt(.065*.065+.51*.51)-sqrt(.065*.065+.49*.49))*1e9/346.4;
   local[0]=base;local[1]=(uint64_t)(base+lower+bias);
   remote[0]=base+17000;remote[1]=(uint64_t)(base+lower+12000);
   AppPosition_PublishLocal(local,quality,NextId(),now);

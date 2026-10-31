@@ -182,3 +182,5 @@ POSITION按13×2cm矩形实现标准扫频方向估计、A摆放图/B方向箭�
 - [2026-09-30 自动温度接口与提示同步](commit_logs/2026-09-30-auto-temperature.md)：AUTO预留入口、传感器接入约束及两板反馈同步，独立成篇。
 - [2026-10-02 命令行角色构建修复](commit_logs/2026-10-02-build-role-consistency.md)：修复文件级宏覆盖造成的模块角色不一致，加入全量构建和实际编译参数核对。
 - [2026-10-02 再次裁剪与烧录](commit_logs/2026-10-02-unused-libraries.md)：按此前范围移出8个未使用库目录，A/B构建及下载校验通过，用户确认功能正常并建立提交。
+
+- [2026-10-31 详情页署名与声速公式](commit_logs/2026-10-31-details-sound-speed.md)。

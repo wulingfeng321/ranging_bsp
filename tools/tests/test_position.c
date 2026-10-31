@@ -19,7 +19,7 @@ static void RunAngle(int deg)
   syncModel.slope=APP_BOARD_ROLE==APP_BOARD_B ? .00005 : 0;
   syncModel.offset=APP_BOARD_ROLE==APP_BOARD_B ? 700000000 : 0; syncModel.origin=0;
   for(k=0;k<4;++k) arrival[k]=.251237+(sqrt((sx-coordinates[k][0])*(sx-coordinates[k][0])+
-    (sy-coordinates[k][1])*(sy-coordinates[k][1]))-1)/346.45;
+    (sy-coordinates[k][1])*(sy-coordinates[k][1]))-1)/346.4;
   for(block=0;block<66;++block) {
     uint64_t begin=audioCount;
     for(i=0;i<APP_AUDIO_HALF_FRAMES;++i) for(k=0;k<2;++k) {
@@ -115,7 +115,7 @@ int main(void)
   }
   clockNs+=2000000000ULL;PositionNetwork(HAL_GetTick());assert(!appPositionStatus.valid);
   ApplyUi(APP_PAGE_STANDARD,250);assert(!positionEventId && !appPositionStatus.valid);
-  { double t[4]={0,100000,200000,0};int32_t a;uint32_t r;assert(!Position_Solve(t,346.45f,&a,&r)); }
+  { double t[4]={0,100000,200000,0};int32_t a;uint32_t r;assert(!Position_Solve(t,346.4f,&a,&r)); }
 
   { PositionDetector detector; int16_t v[POS_N];unsigned i;
     Position_Init(&detector);memset(v,0,sizeof(v));assert(Position_Score(&detector,v)==0);
@@ -133,7 +133,7 @@ int main(void)
 
   }
   if(APP_BOARD_ROLE==APP_BOARD_A) {
-    double expected=(sqrt(.065*.065+.51*.51)-sqrt(.065*.065+.49*.49))*1e9/346.45;
+    double expected=(sqrt(.065*.065+.51*.51)-sqrt(.065*.065+.49*.49))*1e9/346.4;
     unsigned i;
     uiPage=APP_PAGE_POSITION;uiAckRevision=uiRevision;appRangeStatus.locked=1;
     assert(AppRange_PositionCalibrate());uiAckRevision=uiRevision;

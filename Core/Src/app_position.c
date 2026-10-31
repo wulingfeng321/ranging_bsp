@@ -169,7 +169,7 @@ int AppPosition_Tick(uint32_t now,int active,int32_t temperature,
         if(appPositionStatus.calibration==1) {
           /* Operator places source 0.5m from rectangle centre on the TOP axis.
            * Account for actual near-field path differences, not zero all pairs. */
-          double sound=331.3+0.0606*temperature;
+          double sound=331.4+0.06*temperature;
           double lower=(sqrt(0.065*0.065+0.51*0.51)-sqrt(0.065*0.065+0.49*0.49))*1e9/sound;
           if(positionLocalQ>=700 && positionRemoteQ>=700) {
             for(i=0;i<3;++i) {
@@ -192,7 +192,7 @@ int AppPosition_Tick(uint32_t now,int active,int32_t temperature,
           appPositionStatus.valid=0;
         } else {
           for(i=0;i<3;++i) t[i+1]-=positionBias[i];
-          appPositionStatus.valid=(uint8_t)Position_Solve(t,331.3f+0.0606f*temperature,&angle,&residual);
+          appPositionStatus.valid=(uint8_t)Position_Solve(t,331.4f+0.06f*temperature,&angle,&residual);
         }
         appPositionStatus.angleDeg=angle; appPositionStatus.residualNs=residual;
         appPositionStatus.quality=positionLocalQ<positionRemoteQ ? positionLocalQ:positionRemoteQ;

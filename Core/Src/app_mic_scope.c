@@ -124,7 +124,7 @@ static void Standard(uint32_t now)
 {
   char line[80]; unsigned p;
   int32_t temp=AppRange_Temperature(),absolute=temp<0 ? -temp : temp;
-  int32_t speed=331300+(606*temp)/10;
+  int32_t speed=331400+60*temp;
   int fresh=rangeState==MIC_SCOPE_RANGE_VALID && now-resultTick<APP_RANGE_RESULT_HOLD_MS &&
     appRangeStatus.locked && AppRange_SettingsReady();
   uint32_t color=fresh ? (appRangeStatus.resultIsStat ? GOOD : WARN) : MUTED;
@@ -220,6 +220,10 @@ static void Diagnostics(void)
   (void)snprintf(line,sizeof(line),"SYNC +/- %luns  DSP:%luus LOAD:%lu/1000",
     (unsigned long)appRangeStatus.syncErrorNs,(unsigned long)appRangeStatus.dspMaxUs,
     (unsigned long)appRangeStatus.dspLoadPermille); Text(12,222,line,MUTED);
+  Text(364,85,"He Chenhao",ACCENT);
+  Text(364,101,"23211203",MUTED);
+  Text(364,125,"Li Jingjing",ACCENT);
+  Text(364,141,"23211407",MUTED);
   Button(356,241,112,28,"BACK",1); Text(12,249,"Counters wrap; logs retain full values",MUTED);
 }
 static void ClapPage(uint32_t now)

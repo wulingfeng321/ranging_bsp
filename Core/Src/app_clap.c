@@ -118,7 +118,7 @@ int AppClap_Tick(uint32_t now,int active,int32_t temperature,uint32_t syncErrorN
       else if(delta< -10000000) clapHaveRemote=0;
       else {
         uint64_t magnitude=(uint64_t)(delta<0 ? -delta:delta);
-        float cm=(float)magnitude*(331.3f+0.0606f*temperature)/10000000.0f;
+        float cm=(float)magnitude*(331.4f+0.06f*temperature)/10000000.0f;
         clapHaveLocal=clapHaveRemote=0;
         if(cm>300) { ++appClapStatus.rejected;return 0; }
         appClapStatus.distanceCm=(uint32_t)(cm+0.5f);

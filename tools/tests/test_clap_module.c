@@ -50,11 +50,11 @@ static void CheckPairingAndRetry(void)
       AppClap_PublishLocal(local,850,NextId(),now);
       assert(AppClap_ReceiveEvent(i,local+delta,700,local+20000000ULL,now));
       assert(Tick(now,&tx) && tx.kind==APP_CLAP_TX_RESULT);
-      assert(tx.distanceCm==(uint32_t)(i*34.645f+0.5f));
+      assert(tx.distanceCm==(uint32_t)(i*34.64f+0.5f));
       assert(tx.side==1 && tx.quality==700);
       assert(appClapStatus.recentCount==(i<6 ? i:6));
       for(j=0;j<appClapStatus.recentCount;++j) {
-        assert(appClapStatus.recentCm[j]==(uint32_t)((i-j)*34.645f+0.5f));
+        assert(appClapStatus.recentCm[j]==(uint32_t)((i-j)*34.64f+0.5f));
         assert(((tx.history>>(9*j))&511U)==appClapStatus.recentCm[j]);
       }
       assert(tx.history>>54==appClapStatus.recentCount);

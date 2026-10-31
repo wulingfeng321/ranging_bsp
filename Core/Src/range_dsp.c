@@ -309,11 +309,11 @@ int RangeDsp_Distance(int64_t deltaNs, int32_t temperatureDeciC,
                       uint32_t *mm, int32_t *direction)
 {
   uint64_t magnitude;
-  int32_t speed; /* mm/s, c = 331.3 + 0.606*T Celsius */
+  int32_t speed; /* mm/s, c = 331.4 + 0.6*T Celsius */
   if (temperatureDeciC < -100 || temperatureDeciC > 500 ||
       deltaNs < -20000000LL || deltaNs > 20000000LL) return 0;
   magnitude = (uint64_t)(deltaNs < 0 ? -deltaNs : deltaNs);
-  speed = 331300 + (606 * temperatureDeciC) / 10;
+  speed = 331400 + 60 * temperatureDeciC;
   *mm = (uint32_t)((magnitude * (uint32_t)speed + 500000000ULL) / 1000000000ULL);
   *direction = magnitude <= 10000 ? 0 : (deltaNs > 0 ? 1 : -1);
   return *mm <= 5000U;
