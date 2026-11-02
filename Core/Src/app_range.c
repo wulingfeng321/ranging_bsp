@@ -33,6 +33,10 @@ AppRangeArrival appRangeArrival;
 static AppPage uiPage = APP_PAGE_STANDARD;
 static int32_t temperature = APP_TEMPERATURE_DECI_C;
 static AppRangeTemperatureReader temperatureReader;
+static uint32_t autoEnabled,autoPollMs;
+static uint32_t resultBasisMm;
+static int32_t resultBasisTemp;
+static int64_t batchDelayNs[15];
 static uint32_t autoStatus,autoSerial=1,autoRequestCounter,autoPendingId,autoPendingStatus;
 static uint32_t autoSeenRequest,autoSeenState,autoReadRevision;
 static uint8_t autoPendingRead;
@@ -43,6 +47,7 @@ static void AutoFeedback(uint32_t status)
   else { autoPendingRead=0;autoPendingStatus=status;autoPendingId=++autoRequestCounter;
     if(!autoPendingId) autoPendingId=++autoRequestCounter; }
 }
+unsigned AppRange_AutoTemperatureEnabled(void) { return autoEnabled; }
 unsigned AppRange_AutoTemperatureStatus(void) { return autoStatus; }
 static uint32_t uiRevision=1, uiAckRevision, uiLastSend;
 static uint32_t uiRequestId, uiPendingId, uiRequestKind, uiRequestValue, uiLastRequest;
@@ -191,6 +196,29 @@ static int RangingEnabled(void)
 static void ApplyUi(AppPage page,int32_t temp)
 {
   uint32_t mask=__get_PRIMASK();
+  if(page==uiPage && page==APP_PAGE_STANDARD && temp!=temperature) {
+#if APP_RANGE_STATISTICS
+    unsigned i; int direction; uint32_t mm;
+#endif
+    temperature=temp;
+    if(appRangeStatus.valid && resultBasisMm) {
+      appRangeStatus.distanceMm=(uint32_t)(((uint64_t)resultBasisMm*(331400+60*temp)+
+        (331400+60*resultBasisTemp)/2)/(331400+60*resultBasisTemp));
+      txResultMm=appRangeStatus.distanceMm; resultMm=txResultMm;
+    }
+#if APP_RANGE_STATISTICS
+    for(i=0;i<batch.count;i++) {
+      if(RangeDsp_Distance(batchDelayNs[i],temp,&mm,&direction))
+        batch.value[i]=batchDelayNs[i]<0 ? -(int32_t)mm : (int32_t)mm;
+    }
+    if(batch.stage==2) { batch.stage=1;RangeBatch_Finish(&batch);
+      appRangeStatus.batchSpanMm=batch.span;appRangeStatus.batchStage=batch.stage; }
+#endif
+    AppCapture_Log("ui,%lu,%u,%ld,%lu\n",(unsigned long)HAL_GetTick(),
+      (unsigned)page,(long)temp,(unsigned long)uiRevision);
+    /* Keep audio fit, event times, batch age and result expiry across temperature changes. */
+    return;
+  }
   uiPage=page; temperature=temp; ResetPageMeasurements();
   AppCapture_SetEnabled(page==APP_PAGE_STANDARD);
   ClearMeasurements();
@@ -215,7 +243,7 @@ static int RequestUi(uint32_t kind,uint32_t value)
   } else {
     uiPendingId=++uiRequestId; if(!uiPendingId) uiPendingId=++uiRequestId;
     uiRequestKind=kind; uiRequestValue=value; uiLastSend=HAL_GetTick()-250U;
-    ClearMeasurements();
+    if(kind!=1) ClearMeasurements();
   }
   return 1;
 }
@@ -237,7 +265,8 @@ int AppRange_AdjustTemperature(int32_t stepDeciC)
 {
   int32_t next=temperature+stepDeciC;
   if((stepDeciC!=5 && stepDeciC!=-5) || next < -100 || next > 500) return 0;
-  AutoFeedback(0);
+  if(AppCapture_Busy() || !AppRange_SettingsReady()) return 0;
+  autoEnabled=0;AutoFeedback(0);
   return RequestUi(1,(uint32_t)(next+100));
 }
 void AppRange_SetTemperatureReader(AppRangeTemperatureReader reader)
@@ -246,6 +275,7 @@ int AppRange_AutoTemperature(void)
 {
   int32_t value,rounded;
   if(AppCapture_Busy() || !AppRange_SettingsReady()) { AutoFeedback(3);return -1; }
+  autoEnabled=1;autoPollMs=HAL_GetTick();
   if(APP_BOARD_ROLE==APP_BOARD_B && !temperatureReader) {
     if(!autoPendingRead) {
       AutoFeedback(3);autoPendingRead=1;autoReadRevision=uiRevision;uiLastSend=HAL_GetTick()-250U;
@@ -269,13 +299,19 @@ int AppRange_SyncElapsed(uint64_t *elapsedUs,uint64_t *localUs)
   *elapsedUs=(master-syncOriginNs)/1000ULL;
   return 1;
 }
+static void AutoTemperatureProcess(uint32_t now)
+{
+  if(APP_BOARD_ROLE!=APP_BOARD_A || !autoEnabled || uiPage!=APP_PAGE_STANDARD || now-autoPollMs<1000U ||
+     AppCapture_Busy() || !AppRange_SettingsReady()) return;
+  (void)AppRange_AutoTemperature();
+}
 static void UiProcess(uint32_t now)
 {
   if(!appRangeStatus.locked) syncOriginNs=0;
   if(now-uiLastSend<250U) return;
   uiLastSend=now;
   if(APP_BOARD_ROLE==APP_BOARD_A)
-    Send(APP_RANGE_MSG_AUTO_STATUS_STATE,autoSerial,0,autoStatus,autoSeenRequest,0,0,0);
+    Send(APP_RANGE_MSG_AUTO_STATUS_STATE,autoSerial,0,autoStatus,autoSeenRequest,autoEnabled,0,0);
   else if(autoPendingId)
     Send(autoPendingRead ? APP_RANGE_MSG_AUTO_READ_REQUEST : APP_RANGE_MSG_AUTO_STATUS_REQUEST,
          autoPendingId,0,autoPendingRead ? 0 : autoPendingStatus,0,0,0,0);
@@ -300,6 +336,7 @@ void AppRange_ResetRound(void)
 static void DisplayResult(uint32_t id, uint32_t mm, uint32_t side, uint32_t quality)
 {
   if (id==appRangeStatus.resultId) return; /* Retries never refresh stale results. */
+  resultBasisMm=mm;resultBasisTemp=temperature;
   appRangeStatus.resultId=id; appRangeStatus.distanceMm=mm;
   appRangeStatus.direction=side==1 ? 1 : (side==2 ? -1 : 0);
   appRangeStatus.quality=quality; appRangeStatus.valid=1;
@@ -347,15 +384,15 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
   if(type==APP_RANGE_MSG_AUTO_STATUS_REQUEST && APP_BOARD_ROLE==APP_BOARD_A) {
     if(!id || x>4) goto reject;
     if(!autoSeenRequest || (id!=autoSeenRequest && id-autoSeenRequest<0x80000000UL)) {
-      autoSeenRequest=id;AutoFeedback((uint32_t)x);
+      autoSeenRequest=id;if(x==0) autoEnabled=0;AutoFeedback((uint32_t)x);
     }
     uiLastSend=now-250U;return;
   }
   if(type==APP_RANGE_MSG_AUTO_STATUS_STATE && APP_BOARD_ROLE==APP_BOARD_B) {
-    if(!id || x>4 || y>UINT32_MAX) goto reject;
+    if(!id || x>4 || y>UINT32_MAX || z>1) goto reject;
     if(autoSeenState && id!=autoSeenState && id-autoSeenState>=0x80000000UL) return;
     if(autoPendingId && y!=autoPendingId) return;
-    autoSeenState=id;autoStatus=(uint32_t)x;
+    autoSeenState=id;autoStatus=(uint32_t)x;autoEnabled=(uint32_t)z;
     if(autoPendingId && y==autoPendingId) {
       /* OK may arrive before UI_STATE. Keep LINKED false until its new
        * temperature revision arrives, without clearing same-value results. */
@@ -375,6 +412,7 @@ static void Receive(void *arg, struct udp_pcb *socket, struct pbuf *p,
     if(!uiLastRequest || (id!=uiLastRequest && id-uiLastRequest<0x80000000UL)) {
       /* Request values are absolute, so duplicates cannot double-step temperature. */
       uiLastRequest=id;
+      if(x==1) { autoEnabled=0;AutoFeedback(0); }
       if(x>=2 || (x==0 && uiPage!=(AppPage)y) || (x==1 && temperature!=(int32_t)y-100)) {
         ++uiRevision; if(!uiRevision) ++uiRevision;
         ApplyUi(x==0 ? (AppPage)y : uiPage,x==1 ? (int32_t)y-100 : temperature);
@@ -995,6 +1033,8 @@ static void PairEvents(void)
         appRangeStatus.batchUsed=0; appRangeStatus.batchSpanMm=0;
       }
       batchLastEventNs=localEvents[i].time;
+      if(batch.stage!=1) batchDelayNs[0]=delta;
+      else if(batch.count<15) batchDelayNs[batch.count]=delta;
       RangeBatch_Add(&batch,delta<0 ? -(int32_t)resultMm : (int32_t)resultMm,resultQuality,now);
       appRangeStatus.batchStage=1; appRangeStatus.batchCount=batch.count;
 #else
@@ -1070,6 +1110,7 @@ void AppRange_Process(void)
     }
     return;
   }
+  AutoTemperatureProcess(now);
   UiProcess(now);
   PositionNetwork(now);ClapNetwork(now);
   if(APP_BOARD_ROLE==APP_BOARD_A && uiPage==APP_PAGE_WAVE && appRangeStatus.locked &&

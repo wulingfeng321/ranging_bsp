@@ -59,6 +59,8 @@ void AppRange_SetTemperatureReader(AppRangeTemperatureReader reader);
 int AppRange_AutoTemperature(void);
 /* Shared AUTO feedback: 0 clear, 1 OK, 2 N/A, 3 WAIT, 4 ERR. */
 unsigned AppRange_AutoTemperatureStatus(void);
+/* AUTO remains active until a manual temperature adjustment; A polls cached data. */
+unsigned AppRange_AutoTemperatureEnabled(void);
 /* Common counter starts at an A-clock second boundary after lock; zero while
  * unlocked or awaiting the common origin. Local clock never resets. */
 int AppRange_SyncElapsed(uint64_t *elapsedUs, uint64_t *localUs);

@@ -1,3 +1,4 @@
+unsigned AppRange_AutoTemperatureEnabled(void) { return 0; }
 /* Actual framebuffer drawing plus deterministic touch and shared-clock tests. */
 #include <assert.h>
 #include <string.h>
@@ -147,6 +148,8 @@ int main(int argc,char **argv)
   MicScope_SetDistanceMm(1000); Draw(HAL_GetTick(),page);
   assert(strstr(screenText,"1.000 m") && strstr(screenText,"P3") && strstr(screenText,"+0.5 C"));
   if(argc>1) Save(argv[1],"standard");
+  temp=350;Draw(HAL_GetTick(),page);assert(strstr(screenText,"1.017 m"));
+  temp=250;Draw(HAL_GetTick(),page);assert(strstr(screenText,"1.000 m"));
   Draw(HAL_GetTick()+APP_RANGE_RESULT_HOLD_MS,page); assert(strstr(screenText,"EXPIRED") && !strstr(screenText,"1.000 m"));
   diagnostics=1;
   rangeDspDiagnostics.coarsePassed=rangeDspDiagnostics.failPulse[0]=999999;

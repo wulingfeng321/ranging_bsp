@@ -184,3 +184,5 @@ POSITION按13×2cm矩形实现标准扫频方向估计、A摆放图/B方向箭�
 - [2026-10-02 再次裁剪与烧录](commit_logs/2026-10-02-unused-libraries.md)：按此前范围移出8个未使用库目录，A/B构建及下载校验通过，用户确认功能正常并建立提交。
 
 - [2026-10-31 详情页署名与声速公式](commit_logs/2026-10-31-details-sound-speed.md)。
+
+- [2026-10-31 持续AUTO温度补偿](commit_logs/2026-10-31-continuous-temperature.md)，[验收核对](ACCEPTANCE_REVIEW_2026-10-31.md)。

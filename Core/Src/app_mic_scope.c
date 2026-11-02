@@ -25,6 +25,7 @@
 
 extern LTDC_HandleTypeDef hLtdcHandler;
 static uint32_t lastDraw, backBuffer=FRAME_B;
+static int32_t distanceTemperature;
 static uint32_t distanceMm, resultTick, touchTick, touchSince;
 static int32_t drawnTemperature=APP_TEMPERATURE_DECI_C;
 static uint64_t presentAt;
@@ -49,6 +50,7 @@ static uint32_t textBackground=BG;
 void MicScope_SetDistanceMm(uint32_t mm)
 {
   if(mm>999999U) { MicScope_SetRangeState(MIC_SCOPE_RANGE_INVALID); return; }
+  distanceTemperature=AppRange_Temperature();
   distanceMm=mm; resultTick=HAL_GetTick(); rangeState=MIC_SCOPE_RANGE_VALID;
 }
 void MicScope_SetRangeState(MicScope_RangeState state)
@@ -127,10 +129,12 @@ static void Standard(uint32_t now)
   int32_t speed=331400+60*temp;
   int fresh=rangeState==MIC_SCOPE_RANGE_VALID && now-resultTick<APP_RANGE_RESULT_HOLD_MS &&
     appRangeStatus.locked && AppRange_SettingsReady();
+  uint32_t correctedMm=(uint32_t)(((uint64_t)distanceMm*(331400+60*temp)+
+    (331400+60*distanceTemperature)/2)/(331400+60*distanceTemperature));
   uint32_t color=fresh ? (appRangeStatus.resultIsStat ? GOOD : WARN) : MUTED;
   Common(); Font(&Font24);
   if(fresh) (void)snprintf(line,sizeof(line),"%lu.%03lu m",
-    (unsigned long)(distanceMm/1000),(unsigned long)(distanceMm%1000));
+    (unsigned long)(correctedMm/1000),(unsigned long)(correctedMm%1000));
   else (void)snprintf(line,sizeof(line),"--.--- m");
   Text(12,73,line,color); Font(&Font12);
   (void)snprintf(line,sizeof(line),"%s | SOURCE %s",
@@ -175,7 +179,7 @@ static void Standard(uint32_t now)
   { unsigned status=AppRange_AutoTemperatureStatus();
     if(status) Text(174,197,status==1 ? "OK" : (status==2 ? "N/A" : (status==3 ? "WAIT":"ERR")),WARN);
   }
-  Button(222,191,74,36,"AUTO",AppRange_SettingsReady() && !AppCapture_Busy());
+  Button(222,191,74,36,AppRange_AutoTemperatureEnabled() ? "AUTO ON":"AUTO",AppRange_SettingsReady() && !AppCapture_Busy());
   Button(306,191,76,36,"-0.5 C",AppRange_SettingsReady() && !AppCapture_Busy() && temp>-100);
   Button(392,191,76,36,"+0.5 C",AppRange_SettingsReady() && !AppCapture_Busy() && temp<500);
   Footer();

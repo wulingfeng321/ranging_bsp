@@ -43,6 +43,23 @@ int main(void)
      * feedback cancels an older read even if packets arrive in reverse order. */
     Inject(APP_RANGE_MSG_AUTO_STATUS_REQUEST,9,0,0,0,0);
     Inject(APP_RANGE_MSG_AUTO_READ_REQUEST,8,0,0,0,0);assert(sensorReads==count && autoStatus==0);
+    /* Continuous reads, unchanged samples, stale cache recovery and manual exit. */
+    Ready();sensorGood=1;sensorValue=250;AppRange_AutoTemperature();Ready();
+    DisplayResult(900,1000,1,900);rev=lastResultMs;
+    count=sensorReads;sensorValue=350;
+    AutoTemperatureProcess(autoPollMs+999);assert(sensorReads==count);
+    clockNs+=1000000000ULL;AutoTemperatureProcess(HAL_GetTick());
+    assert(autoEnabled && temperature==350 && appRangeStatus.distanceMm==1017);
+    assert(lastResultMs==rev && appRangeStatus.resultId==900);
+    Ready();sensorValue=250;clockNs+=1000000000ULL;AutoTemperatureProcess(HAL_GetTick());
+    assert(appRangeStatus.distanceMm==1000);Ready();
+    sensorGood=0;clockNs+=1000000000ULL;AutoTemperatureProcess(HAL_GetTick());
+    assert(autoEnabled && autoStatus==2 && temperature==250);
+    sensorGood=1;sensorValue=260;clockNs+=1000000000ULL;AutoTemperatureProcess(HAL_GetTick());
+    assert(temperature==260 && autoStatus==1);Ready();
+    assert(AppRange_AdjustTemperature(5) && !autoEnabled);Ready();
+    count=sensorReads;clockNs+=2000000000ULL;AutoTemperatureProcess(HAL_GetTick());
+    assert(sensorReads==count);
     autoSeenRequest=UINT32_MAX;sensorValue=280;
     Inject(APP_RANGE_MSG_AUTO_READ_REQUEST,1,0,0,0,0);assert(autoSeenRequest==1 && sensorReads==count+1);
   } else {
