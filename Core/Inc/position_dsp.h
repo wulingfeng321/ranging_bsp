@@ -8,6 +8,13 @@
 #define POS_FS 24000U
 #define POS_N 288U
 #define POS_RING 4096U
+/* Squared correlation gates; coarse admission stays unchanged to bound load. */
+#define POS_PEAK_START_SCORE 0.25f
+#define POS_PEAK_ACCEPT_SCORE 0.30f
+#define POS_CAL_MIN_QUALITY 650U
+#define POS_FIT_MAX_NS 25000.0
+#define POS_DIRECTION_NORM_MIN 0.65
+#define POS_DIRECTION_NORM_MAX 1.35
 static float Position_Template(double t,int quadrature)
 {
   double w;
@@ -85,7 +92,7 @@ static float Position_Coarse(const PositionDetector *s,const int16_t *v)
 static int Position_Peak(PositionDetector *s,uint64_t sample,float q0,float q1,double at[2],uint32_t *quality)
 {
   float q[2]; unsigned k; q[0]=q0; q[1]=q1;
-  if(!s->active && (q0>0.30f || q1>0.30f)) {
+  if(!s->active && (q0>POS_PEAK_START_SCORE || q1>POS_PEAK_START_SCORE)) {
     s->active=1; s->start=sample; s->best[0]=s->best[1]=0;
   }
   if(s->active) {
@@ -97,7 +104,7 @@ static int Position_Peak(PositionDetector *s,uint64_t sample,float q0,float q1,d
   s->prev[0]=q0; s->prev[1]=q1;
   if(!s->active || sample-s->start<48) return 0;
   s->active=0;
-  if(s->best[0]<0.35f || s->best[1]<0.35f) return -1;
+  if(s->best[0]<POS_PEAK_ACCEPT_SCORE || s->best[1]<POS_PEAK_ACCEPT_SCORE) return -1;
   for(k=0;k<2;++k) {
     float divisor=s->left[k]-2*s->best[k]+s->right[k];
     float fraction=divisor<-0.000001f ? 0.5f*(s->left[k]-s->right[k])/divisor : 0;
@@ -123,7 +130,7 @@ static int Position_Solve(const double t[4],float sound,int32_t *angle,uint32_t 
   *residual=(uint32_t)(mismatch+0.5);
   if(fabs(t[1]-t[0])>75000 || fabs(t[3]-t[2])>75000 ||
      fabs(t[2]-t[0])>420000 || fabs(t[3]-t[1])>420000 ||
-     mismatch>18000 || norm<0.70 || norm>1.30) return 0;
+     mismatch>POS_FIT_MAX_NS || norm<POS_DIRECTION_NORM_MIN || norm>POS_DIRECTION_NORM_MAX) return 0;
   deg=atan2(ux,uy)*57.29577951308232;
   if(deg<0) deg+=360;
   *angle=((int32_t)(deg+0.5))%360;

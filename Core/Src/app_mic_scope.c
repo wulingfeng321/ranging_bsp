@@ -290,7 +290,7 @@ static void WaveLive(void)
   Text(12,76,"LOCAL MIC L / LIVE / 10ms / RANGE OFF",ACCENT);
   if(ps) (void)snprintf(line,sizeof(line),"TONE LOCK %lu.%03lu Hz / AUTO GAIN",
     (unsigned long)(mhz/1000),(unsigned long)(mhz%1000));
-  else (void)snprintf(line,sizeof(line),"500Hz CAL %lu/5s / KEEP SOURCE + BOARDS STILL",
+  else (void)snprintf(line,sizeof(line),"400-600Hz CAL %lu/5s / KEEP SOURCE + BOARDS STILL",
     (unsigned long)(AppRange_WaveCalMs()/1000U));
   Text(12,93,line,ps ? GOOD : WARN);
   BSP_LCD_SetTextColor(PANEL);

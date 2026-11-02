@@ -100,6 +100,24 @@ int main(void)
 {
   int angle;uint32_t last;
   CheckCoarseRing();
+  /* Moderate correlation now produces an onset; weak pairs still fail. */
+  { PositionDetector d;double at[2];uint32_t q;unsigned i;int found=0;
+    Position_Init(&d);
+    for(i=0;i<=48;++i) found=Position_Peak(&d,i,i==1 ? .32f:.26f,i==1 ? .32f:.26f,at,&q);
+    assert(found==1 && q>=565 && q<=566);
+    Position_ResetPeaks(&d);
+    for(i=0;i<=48;++i) found=Position_Peak(&d,i,.27f,.26f,at,&q);
+    assert(found==-1);
+  }
+  { int32_t a;uint32_t r;
+    /* Same forward direction, 22us disagreement accepted; 30us rejected. */
+    double moderate[4]={0,65000,0,43000},bad[4]={0,70000,0,40000};
+    assert(Position_Solve(moderate,346.4f,&a,&r) && AngularError(a,0)<5 && r==22000);
+    assert(!Position_Solve(bad,346.4f,&a,&r));
+    { double lowNorm[4]={0,39000,0,39000};
+      assert(Position_Solve(lowNorm,346.4f,&a,&r) && a==0);
+      lowNorm[1]=lowNorm[3]=30000;assert(!Position_Solve(lowNorm,346.4f,&a,&r)); }
+  }
   AppRange_Init();appNetStatus.online=1;AppRange_Process();
   uiKnown=1;uiAckRevision=uiRevision;uiPage=APP_PAGE_POSITION;
   for(angle=0;angle<360;angle+=45) RunAngle(angle);

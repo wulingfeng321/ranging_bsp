@@ -98,13 +98,13 @@ static void CheckCalibrationAndRetry(void)
     AppPositionAudio audio;AppPositionOnset onset;
     AppAudioTime time={0,10000000000.0,1e9/48000};
     AppPosition_BeginCalibration();
-    Pair(start,8000,699,&tx);assert(!appPositionStatus.calibrationCount);
-    for(i=0;i<3;++i) Pair(start+(i+1)*500U,8000,950,&tx);
+    Pair(start,8000,649,&tx);assert(!appPositionStatus.calibrationCount);
+    for(i=0;i<3;++i) Pair(start+(i+1)*500U,8000,650,&tx);
     assert(appPositionStatus.calibrationCount==3);
     newest=4000;epoch=1;audio=Audio();
     assert(!AppPosition_Process(&audio,&time,Now,&onset));
     assert(appPositionStatus.backlogResets==1 && appPositionStatus.calibrationCount==3);
-    for(i=3;i<8;++i) Pair(start+(i+1)*500U,8000,950,&tx);
+    for(i=3;i<8;++i) Pair(start+(i+1)*500U,8000,650,&tx);
     assert(appPositionStatus.calibration==2 && tx.calibration==40);
     Pair(start+4500,8000,950,&tx);assert(tx.valid && tx.angleDeg<2);
     assert(!Tick(start+4649,&tx));assert(Tick(start+4650,&tx));

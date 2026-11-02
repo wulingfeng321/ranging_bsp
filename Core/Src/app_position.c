@@ -171,7 +171,7 @@ int AppPosition_Tick(uint32_t now,int active,int32_t temperature,
            * Account for actual near-field path differences, not zero all pairs. */
           double sound=331.4+0.06*temperature;
           double lower=(sqrt(0.065*0.065+0.51*0.51)-sqrt(0.065*0.065+0.49*0.49))*1e9/sound;
-          if(positionLocalQ>=700 && positionRemoteQ>=700) {
+          if(positionLocalQ>=POS_CAL_MIN_QUALITY && positionRemoteQ>=POS_CAL_MIN_QUALITY) {
             for(i=0;i<3;++i) {
               double expected=i==1 ? 0 : lower;
               double error=t[i+1]-expected;

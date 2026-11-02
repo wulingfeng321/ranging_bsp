@@ -186,3 +186,5 @@ POSITION按13×2cm矩形实现标准扫频方向估计、A摆放图/B方向箭�
 - [2026-10-31 详情页署名与声速公式](commit_logs/2026-10-31-details-sound-speed.md)。
 
 - [2026-10-31 持续AUTO温度补偿](commit_logs/2026-10-31-continuous-temperature.md)，[验收核对](ACCEPTANCE_REVIEW_2026-10-31.md)。
+
+- 2026-11-02：持续AUTO检查点`1ccc207`；[定位响应门槛调整](commit_logs/2026-11-02-position-thresholds.md)已由用户确认定位改善，连同400-600Hz波形提示建立检查点。
