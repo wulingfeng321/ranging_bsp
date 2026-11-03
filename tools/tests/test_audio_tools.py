@@ -50,14 +50,21 @@ class AudioToolsTests(unittest.TestCase):
         self.assertEqual(len(list(self.output.glob("*.wav"))), 5)
         for rate in (48000,):
             for profile, amplitude in (("standard", 0.9), ("wide", 0.75)):
-                filename = audio_name(f"{profile}_repeat", rate, rate * 31 // 2)
+                frames = rate * (25 if profile == "standard" else 31) // 2
+                filename = audio_name(f"{profile}_repeat", rate, frames)
                 metadata, pcm = read_wav(self.output / filename)
-                self.assertEqual(metadata, (rate, 1, 2, rate * 31 // 2))
-                group = chirp_group(profile, rate, amplitude)
-                for start in (0, 4 * rate, 8 * rate):
-                    self.assertEqual(pcm[start:start + len(group)], group)
-                self.assertFalse(any(pcm[len(group):4 * rate]))
-                self.assertFalse(any(pcm[8 * rate + len(group):]))
+                self.assertEqual(metadata, (rate, 1, 2, frames))
+                if profile == "standard":
+                    period = chirp_group(profile, rate, amplitude, signatures=1)
+                    for i in range(15):
+                        self.assertEqual(pcm[i*len(period):(i+1)*len(period)], period)
+                    self.assertFalse(any(pcm[15*len(period):]))
+                else:
+                    group = chirp_group(profile, rate, amplitude)
+                    for start in (0, 4 * rate, 8 * rate):
+                        self.assertEqual(pcm[start:start + len(group)], group)
+                    self.assertFalse(any(pcm[len(group):4 * rate]))
+                    self.assertFalse(any(pcm[8 * rate + len(group):]))
 
     def test_firmware_templates_match_exactly(self):
         for rate in (48000,):

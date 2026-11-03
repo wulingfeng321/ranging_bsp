@@ -97,6 +97,25 @@ int main(void)
       testPayloadU=0; testPayloadV=0;
     }
   }
+  if(APP_BOARD_ROLE==APP_BOARD_A) {
+    uint32_t start;
+    ClearMeasurements();appRangeStatus.locked=1;uiAckRevision=uiRevision;
+    start=HAL_GetTick();
+    for(i=0;i<14;++i) RangeBatch_Add(&batch,131,950,start);
+    lastStateMs=HAL_GetTick();AppRange_Process();assert(batch.stage==1);
+    RangeBatch_Add(&batch,131,950,start);
+    lastStateMs=HAL_GetTick();AppRange_Process();
+    assert(batch.stage==2 && appRangeStatus.resultIsStat && appRangeStatus.distanceMm==131);
+    assert(HAL_GetTick()-start<8000); /* Full batch does not wait for a timer. */
+    ClearMeasurements();start=HAL_GetTick();
+    for(i=0;i<6;++i) RangeBatch_Add(&batch,131,950,start);
+    clockNs+=7999000000ULL;lastStateMs=HAL_GetTick();AppRange_Process();assert(batch.stage==1);
+    clockNs+=1000000ULL;lastStateMs=HAL_GetTick();AppRange_Process();
+    assert(batch.stage==2 && appRangeStatus.batchUsed==6 && appRangeStatus.resultIsStat);
+    ClearMeasurements();RangeBatch_Add(&batch,131,950,HAL_GetTick());
+    clockNs+=8000000000ULL;lastStateMs=HAL_GetTick();AppRange_Process();
+    assert(batch.stage==3 && !appRangeStatus.valid); /* Too few never turns green. */
+  }
   /* Continuous old audio at the enlarged window, no network pairing mocks. */
   {
     int16_t pcm[APP_AUDIO_HALF_FRAMES*2]; uint32_t before=appRangeStatus.events;

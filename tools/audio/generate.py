@@ -56,10 +56,10 @@ def create_parser():
         command.add_argument("--amplitude", type=amplitude_value, default=default_amplitude,
                              help="fraction of PCM full scale, 0..1")
         if kind in ("standard", "wide"):
-            command.add_argument("--rounds", type=positive_count, default=3)
-            command.add_argument("--signatures", type=positive_count, default=5, help="signatures per group")
+            command.add_argument("--rounds", type=positive_count, default=1 if kind == "standard" else 3)
+            command.add_argument("--signatures", type=positive_count, default=15 if kind == "standard" else 5, help="signatures per group")
             command.add_argument("--interval", type=positive_seconds, default=0.5, help="signature interval, seconds")
-            command.add_argument("--gap-seconds", type=finite_seconds, default=1.5, help="extra silence between groups")
+            command.add_argument("--gap-seconds", type=finite_seconds, default=0.0 if kind == "standard" else 1.5, help="extra silence between groups")
             command.add_argument("--tail-seconds", type=finite_seconds, default=5.0)
             command.add_argument("--group-only", action="store_true", help="one group; no extra gaps or tail")
         else:
@@ -118,7 +118,7 @@ def main(argv=None):
             return
         presets = [["standard"], ["position"], ["sine"]]
         if args.regression:
-            presets += [["standard", "--group-only"], ["wide"]]
+            presets += [["standard", "--group-only", "--signatures", "5"], ["wide"]]
         for preset in presets:
             generate_one(parser.parse_args(preset + ["--output-dir", str(args.output_dir)]))
     except (ValueError, OSError) as error:

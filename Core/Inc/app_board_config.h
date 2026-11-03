@@ -70,7 +70,7 @@
 #define APP_RANGE_BATCH_MAX_SPAN_MM 40U
 #define APP_RANGE_BATCH_MIN_MM 100
 #define APP_RANGE_BATCH_MAX_MM 2000
-#define APP_RANGE_BATCH_MS 11000U /* 10.5 s WAV, anchored at first paired event */
+#define APP_RANGE_BATCH_MS 8000U /* 15 signatures at 0.5 s: 7 s span + recovery margin */
 /* Bring-up profile: build BOTH boards with the same setting. Set to 0 to
  * restore the original detector thresholds after acoustic validation. */
 #define APP_RANGE_RELAXED_DETECTION 1

@@ -23,8 +23,8 @@ root = Path(__file__).resolve().parents[2]
 with wave.open(str(standard_audio(48000))) as wav:
     assert (wav.getframerate(), wav.getnchannels(), wav.getsampwidth()) == (FS, 1, 2)
     audio = np.frombuffer(wav.readframes(wav.getnframes()), dtype='<i2').astype(int)
-assert len(audio) == FS * 31 // 2
-assert not np.any(audio[FS * 21 // 2:])
+assert len(audio) == FS * 25 // 2
+assert not np.any(audio[FS * 15 // 2:])
 signature = audio[:5376]
 
 
@@ -115,7 +115,7 @@ for offset in (0, 17, 383, 766):
         if got and (not hits or base + got[0] > hits[-1] + FS // 4):
             assert got[1].count
             hits.append(base + got[0])
-    expected = [offset + g*4*FS + p*FS//2 for g in range(3) for p in range(5)]
+    expected = [offset + p*FS//2 for p in range(15)]
     assert len(hits) == 15, (offset, hits)
     assert max(abs(a-b) for a,b in zip(hits, expected)) < .6
-print('PASS: complete 15.5 s WAV, 15 signatures at four offsets; tail silence gives no events')
+print('PASS: complete 12.5 s WAV, 15 signatures at four offsets; tail silence gives no events')

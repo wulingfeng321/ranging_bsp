@@ -144,7 +144,7 @@ int main(int argc,char **argv)
   appRangeStatus.batchStage=2; appRangeStatus.batchCount=15; appRangeStatus.batchUsed=12;
   appRangeStatus.batchSpanMm=3; appRangeStatus.audioTimeReady=1;
   appRangeArrival.valid=7; appRangeArrival.eventId=15;
-  for(i=0;i<3;++i) { appRangeArrival.syncUs[i]=12001023ULL+i*40000; appRangeArrival.localUs[i]=55001023ULL+i*40000; }
+  for(i=0;i<3;++i) { appRangeArrival.syncUs[i]=12001023ULL+i*500000; appRangeArrival.localUs[i]=55001023ULL+i*500000; }
   MicScope_SetDistanceMm(1000); Draw(HAL_GetTick(),page);
   assert(strstr(screenText,"1.000 m") && strstr(screenText,"P3") && strstr(screenText,"+0.5 C"));
   if(argc>1) Save(argv[1],"standard");

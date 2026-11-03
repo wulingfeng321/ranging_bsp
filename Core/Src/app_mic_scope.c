@@ -106,7 +106,7 @@ static void Common(void)
 static const char *BatchText(void)
 {
   switch(appRangeStatus.batchStage) {
-    case 1:return "BATCH COLLECTING / 11s";
+    case 1:return "BATCH COLLECTING / 8s";
     case 2:return "BATCH ACCEPTED";
     case 3:return "BATCH TOO FEW";
     case 4:return "BATCH UNSTABLE";
@@ -149,7 +149,7 @@ static void Standard(uint32_t now)
     (unsigned long)appRangeStatus.batchUsed,(unsigned long)appRangeStatus.batchCount,
     (unsigned long)appRangeStatus.batchSpanMm,appRangeStatus.audioTimeReady ? "OK" : "WAIT");
   Text(12,108,line,MUTED);
-  (void)snprintf(line,sizeof(line),"LOCAL L LAST #%lu / TOP CANDIDATE",
+  (void)snprintf(line,sizeof(line),"LOCAL L LAST #%lu / SIGNATURES",
     (unsigned long)appRangeArrival.eventId);
   Text(12,128,line,MUTED);
   Button(382,122,86,22,"DETAILS",1);

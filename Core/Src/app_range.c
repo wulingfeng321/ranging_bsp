@@ -656,25 +656,30 @@ static void DetectionReady(uint64_t stamp, uint32_t quality)
   }
 #endif
   if (!appRangeStatus.locked) { ++appRangeStatus.unlockedEvents; return; }
-#if APP_RANGE_JOINT_PEAKS
   {
-    unsigned p;
-    memset(&appRangeArrival,0,sizeof(appRangeArrival));
-    for(p=0;detectedPeaks.count && p<3;++p) {
-      int64_t offset=(int64_t)p*RANGE_PULSE_STEP*1000000000LL/APP_AUDIO_SAMPLE_RATE;
-      uint64_t local,master;
-      offset+=detectedPeaks.peak[0].offsetNs[p];
-      local=(uint64_t)((int64_t)stamp+offset);
-      master=APP_BOARD_ROLE==APP_BOARD_B ? RangeSync_Master(&syncModel,local) : local;
-      appRangeArrival.localUs[p]=local/1000ULL;
-      if(syncOriginNs && master>=syncOriginNs) {
-        appRangeArrival.syncUs[p]=(master-syncOriginNs)/1000ULL;
-        appRangeArrival.valid|=(uint8_t)(1U<<p);
-      }
-    }
-    appRangeArrival.eventId=appRangeStatus.events;
-  }
+    uint64_t local=stamp,master;unsigned p=0;
+#if APP_RANGE_JOINT_PEAKS
+    /* One marker per signature: first pulse of the strongest local candidate. */
+    if(detectedPeaks.count)
+      local=(uint64_t)((int64_t)stamp+detectedPeaks.peak[0].offsetNs[0]);
 #endif
+    master=APP_BOARD_ROLE==APP_BOARD_B ? RangeSync_Master(&syncModel,local) : local;
+    if(!syncOriginNs || master<syncOriginNs) memset(&appRangeArrival,0,sizeof(appRangeArrival));
+    else {
+      while(p<3 && (appRangeArrival.valid&(1U<<p))) ++p;
+      if(p && local/1000ULL<=appRangeArrival.localUs[p-1]) {
+        memset(&appRangeArrival,0,sizeof(appRangeArrival));p=0;
+      }
+      if(p==3) {
+        memmove(appRangeArrival.localUs,appRangeArrival.localUs+1,2*sizeof(uint64_t));
+        memmove(appRangeArrival.syncUs,appRangeArrival.syncUs+1,2*sizeof(uint64_t));p=2;
+      }
+      appRangeArrival.localUs[p]=local/1000ULL;
+      appRangeArrival.syncUs[p]=(master-syncOriginNs)/1000ULL;
+      appRangeArrival.valid|=(uint8_t)(1U<<p);
+      appRangeArrival.eventId=appRangeStatus.events;
+    }
+  }
   if (APP_BOARD_ROLE==APP_BOARD_A)
   {
     localEvents[localIndex].time=stamp; localEvents[localIndex].id=++sequence;
@@ -1152,7 +1157,8 @@ void AppRange_Process(void)
   {
     if(appRangeStatus.locked && now-lastStateMs>1500) Unlock();
 #if APP_RANGE_STATISTICS
-    if(RangingEnabled() && appRangeStatus.locked && batch.stage==1 && now-batch.startMs>=APP_RANGE_BATCH_MS) {
+    if(RangingEnabled() && appRangeStatus.locked && batch.stage==1 &&
+       (batch.count>=15U || now-batch.startMs>=APP_RANGE_BATCH_MS)) {
       RangeBatch_Finish(&batch);
       appRangeStatus.batchStage=batch.stage; appRangeStatus.batchUsed=batch.used;
       appRangeStatus.batchSpanMm=batch.span;

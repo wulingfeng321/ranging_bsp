@@ -23,9 +23,15 @@ int main(void)
   detectedPeaks.peak[0].offsetNs[1]=2000;
   detectedPeaks.peak[0].offsetNs[2]=3000;
   DetectionReady(clockNs+1000000,950);
-  assert(appRangeArrival.valid==7 && appRangeArrival.localUs[0]==10000999);
-  assert(appRangeArrival.localUs[1]==10041002 && appRangeArrival.localUs[2]==10081003);
+  assert(appRangeArrival.valid==1 && appRangeArrival.localUs[0]==10000999);
   assert(appRangeArrival.syncUs[0]==(APP_BOARD_ROLE==APP_BOARD_B ? 999 : 1000999));
+  DetectionReady(clockNs+501000000,950);
+  assert(appRangeArrival.valid==3 && appRangeArrival.localUs[1]-appRangeArrival.localUs[0]==500000);
+  DetectionReady(clockNs+1001000000,950);
+  assert(appRangeArrival.valid==7 && appRangeArrival.localUs[2]-appRangeArrival.localUs[1]==500000);
+  DetectionReady(clockNs+1501000000,950);
+  assert(appRangeArrival.valid==7 && appRangeArrival.localUs[0]==10500999 &&
+         appRangeArrival.localUs[2]==11500999);
   assert(AppRange_AutoTemperature()==(APP_BOARD_ROLE==APP_BOARD_A ? 0:1));
   autoPendingId=0;autoPendingRead=0;
   AppRange_SetTemperatureReader(SensorRead);sensorValue=501;

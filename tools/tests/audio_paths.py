@@ -6,7 +6,7 @@ GENERATED = Path(__file__).resolve().parents[1] / "audio" / "generated"
 
 
 def standard_audio(rate=48000, group=False):
-    mode, duration = ("group", "2p5") if group else ("repeat", "15p5")
+    mode, duration = ("group", "2p5") if group else ("repeat", "12p5")
     return GENERATED / f"standard_{mode}_{rate}hz_{duration}s.wav"
 
 

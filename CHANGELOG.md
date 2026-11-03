@@ -188,3 +188,7 @@ POSITION按13×2cm矩形实现标准扫频方向估计、A摆放图/B方向箭�
 - [2026-10-31 持续AUTO温度补偿](commit_logs/2026-10-31-continuous-temperature.md)，[验收核对](ACCEPTANCE_REVIEW_2026-10-31.md)。
 
 - 2026-11-02：持续AUTO检查点`1ccc207`；[定位响应门槛调整](commit_logs/2026-11-02-position-thresholds.md)已由用户确认定位改善，连同400-600Hz波形提示建立检查点。
+
+- [2026-11-02 连续15签名与最近三次到达时间](commit_logs/2026-11-02-signature-arrivals.md)。
+
+- 2026-11-03：标准连续签名收齐15个有效配对立即结算，不足时8秒超时；两板编译/下载校验完成，详见签名到达记录。

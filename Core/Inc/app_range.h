@@ -33,8 +33,8 @@ extern AppRangeStatus appRangeStatus;
 typedef enum { APP_PAGE_STANDARD, APP_PAGE_CLAP, APP_PAGE_WAVE, APP_PAGE_POSITION } AppPage;
 /* Main-loop owned UI state. A is authoritative; B requests changes reliably.
  * Temperature is in 0.1 C, volatile across reboot, restricted to -10..50 C.
- * Pulse times are the strongest LOCAL candidate's three pulse starts, NOT
- * the selected cross-board pair. All buffers are owned by app_range. */
+ * Times are the latest three LOCAL signatures, oldest first, using each
+ * strongest candidate's first pulse (not the selected cross-board pair). All buffers are owned by app_range. */
 typedef struct {
   uint64_t localUs[3], syncUs[3];
   uint32_t eventId;
